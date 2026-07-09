@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+
+# Flask / database
+*.db
+*.sqlite3
+instance/
+
+# Environment files
+.env
+*.env
+front/.env
+bck/.env
+
+# React / Node
+node_modules/
+front/node_modules/
+build/
+dist/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
