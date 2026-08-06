@@ -144,6 +144,9 @@ def get_expenses():
         with conn.cursor() as cursor:
             cursor.execute("SELECT * FROM expenses WHERE student_id = %s ORDER BY date DESC", (student_id,))
             expenses = cursor.fetchall()
+            for exp in expenses:
+                if exp.get('date'):
+                    exp['date'] = str(exp['date'])
         return jsonify(expenses), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

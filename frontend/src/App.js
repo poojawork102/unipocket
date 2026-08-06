@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { 
-  Wallet, PlusCircle, ArrowUpRight, ArrowDownRight, 
+  Wallet, PlusCircle, ArrowUpRight, 
   PiggyBank, Target, Lightbulb, Moon, Sun, SignOut, 
-  UserPlus, SignIn, ChatCircleText, CalendarBlank, User, X, Plus
+  UserPlus, SignIn, ChatCircleText, CalendarBlank, User, X, Plus,
+  Receipt, ChartBar, Compass, Sparkle, ArrowsClockwise
 } from "@phosphor-icons/react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import "./App.css";
@@ -11,11 +12,14 @@ import "./App.css";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:5000";
 
 export default function App() {
-  // Global State
-  const [theme, setTheme] = useState("light");
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem("up_user")) || null);
+  // Global State & State Persistence (unipocket_user)
+  const [theme, setTheme] = useState("dark");
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem("unipocket_user") || localStorage.getItem("up_user");
+    return saved ? JSON.parse(saved) : null;
+  });
   const [authMode, setAuthMode] = useState("login"); // login or signup
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard or profile
+  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, transactions, budgets, analytics, profile
 
   // Onboarding Wizard Stepper State
   const [isSetupComplete, setIsSetupComplete] = useState(true);
@@ -36,7 +40,7 @@ export default function App() {
   const [savingsForm, setSavingsForm] = useState({ goal_name: "", target_amount: "" });
   const [depositAmounts, setDepositAmounts] = useState({});
 
-  // Merged Category Management inside Set Budget
+  // Category Management inside Set Budget
   const [budgetCategoryMode, setBudgetCategoryMode] = useState("select"); // select or custom
   const [customCategoryName, setCustomCategoryName] = useState("");
 
@@ -45,11 +49,13 @@ export default function App() {
   const [budgets, setBudgets] = useState([]);
   const [savings, setSavings] = useState([]);
   const [categories, setCategories] = useState(["Food", "Travel", "Books", "Entertainment", "Other"]);
-  const [aiTip, setAiTip] = useState("Welcome to UniPocket! Log your first expense to begin.");
+  const [aiTip, setAiTip] = useState("Welcome to UniPocket! Log your first expense to begin gathering intelligent insights.");
+  const [aiTipLoading, setAiTipLoading] = useState(false);
+  const [isBreachedState, setIsBreachedState] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [alertMsg, setAlertMsg] = useState("");
 
-  // Collapsible Floating Chatbot State
+  // Floating AI Coach Drawer State
   const [chatOpen, setChatOpen] = useState(false);
   const [chatLog, setChatLog] = useState([
     { sender: "ai", text: "Hey! I'm Pocky, your AI Money Coach. Ask me anything, or log some transactions to start analyzing!" }
@@ -74,7 +80,7 @@ export default function App() {
     }
   }, [user]);
 
-  // Confetti Particle burst
+  // Confetti Particle burst on savings goal completed
   const triggerConfetti = () => {
     const container = document.body;
     for (let i = 0; i < 60; i++) {
@@ -82,10 +88,11 @@ export default function App() {
       el.style.position = "fixed";
       el.style.width = "10px";
       el.style.height = "10px";
-      el.style.backgroundColor = ["#ccff00", "#00ffff", "#ff66cc", "#ff9933", "#ff3366"][Math.floor(Math.random() * 5)];
+      el.style.backgroundColor = ["#ccff00", "#06b6d4", "#8b5cf6", "#f97316", "#ec4899"][Math.floor(Math.random() * 5)];
       el.style.left = Math.random() * 100 + "vw";
       el.style.top = "-10px";
       el.style.zIndex = "9999";
+      el.style.borderRadius = "2px";
       el.style.transform = `rotate(${Math.random() * 360}deg)`;
       el.style.transition = "transform 2s linear, top 2s linear, opacity 2s ease-out";
       container.appendChild(el);
@@ -100,25 +107,38 @@ export default function App() {
     }
   };
 
-  // Fetch Dashboard and User Categories
+  // Dedicated Expenses Fetcher Function
+  const fetchExpenses = async (studentId) => {
+    if (!studentId) return [];
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/expenses?student_id=${studentId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setExpenses(data);
+        return data;
+      }
+    } catch (err) {
+      console.error("Failed to fetch expenses:", err);
+    }
+    return [];
+  };
+
+  // Fetch Dashboard and User Data
   const fetchDashboardData = async (studentId) => {
     try {
-      const [expRes, budRes, savRes, catRes, aiRes] = await Promise.all([
-        axios.get(`${BACKEND_URL}/api/expenses?student_id=${studentId}`),
+      const [expData, budRes, savRes, catRes, aiRes] = await Promise.all([
+        fetchExpenses(studentId),
         axios.get(`${BACKEND_URL}/api/budgets?student_id=${studentId}`),
         axios.get(`${BACKEND_URL}/api/savings?student_id=${studentId}`),
         axios.get(`${BACKEND_URL}/api/categories?student_id=${studentId}`),
         axios.get(`${BACKEND_URL}/api/ai/tip?student_id=${studentId}`)
       ]);
       
-      const expData = expRes.data;
       const budData = budRes.data;
       
-      setExpenses(expData);
       setBudgets(budData);
       setSavings(savRes.data);
       setCategories(catRes.data);
-      setAiTip(aiRes.data.tip);
 
       // Enforce wizard setup if user has zero budgets configured
       if (budData.length === 0) {
@@ -128,8 +148,9 @@ export default function App() {
       }
 
       // Check category limit warnings for the selected month
-      const currentMonthSpent = expData
-        .filter(item => item.date.startsWith(selectedMonth))
+      const currentExpenses = expData || [];
+      const currentMonthSpent = currentExpenses
+        .filter(item => item.date && item.date.startsWith(selectedMonth))
         .reduce((acc, curr) => {
           acc[curr.category] = (acc[curr.category] || 0) + parseFloat(curr.amount);
           return acc;
@@ -144,13 +165,35 @@ export default function App() {
       });
 
       if (breachedCats.length > 0) {
+        setIsBreachedState(true);
         setAlertMsg(`⚠️ Budget limit breached for: ${breachedCats.join(", ")}!`);
+        setAiTip(`🚨 ACTION REQUIRED: You have breached your budget cap for ${breachedCats.join(", ")}! Pause non-essential spending for the rest of the month.`);
       } else {
+        setIsBreachedState(false);
         setAlertMsg("");
+        setAiTip(aiRes.data.tip);
       }
 
     } catch (err) {
       console.error("Error loading dashboard data:", err);
+    }
+  };
+
+  const fetchAiTip = async () => {
+    if (!user?.student_id) return;
+    setAiTipLoading(true);
+    try {
+      if (isBreachedState) {
+        // If breached, maintain actionable alert
+        setAiTip(prev => prev);
+      } else {
+        const res = await axios.get(`${BACKEND_URL}/api/ai/tip?student_id=${user.student_id}`);
+        setAiTip(res.data.tip);
+      }
+    } catch (err) {
+      console.error("Failed to fetch AI tip:", err);
+    } finally {
+      setAiTipLoading(false);
     }
   };
 
@@ -168,7 +211,7 @@ export default function App() {
     try {
       const res = await axios.post(`${BACKEND_URL}${endpoint}`, authForm);
       if (res.data.user) {
-        localStorage.setItem("up_user", JSON.stringify(res.data.user));
+        localStorage.setItem("unipocket_user", JSON.stringify(res.data.user));
         setUser(res.data.user);
       }
     } catch (err) {
@@ -177,6 +220,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    localStorage.removeItem("unipocket_user");
     localStorage.removeItem("up_user");
     setUser(null);
     setExpenses([]);
@@ -191,7 +235,7 @@ export default function App() {
     ]);
   };
 
-  // Add Custom Category Function
+  // Category Helper
   const addCategorySilent = async (catName) => {
     try {
       await axios.post(`${BACKEND_URL}/api/categories`, {
@@ -207,24 +251,28 @@ export default function App() {
     }
   };
 
-  // Log Expense Outflow
+  // Transaction Payload Alignment Fix: { student_id, title, amount, category, date }
   const handleAddExpense = async (e) => {
     e.preventDefault();
     if (!expenseForm.title || !expenseForm.amount) return;
     try {
       await axios.post(`${BACKEND_URL}/api/expense`, {
         student_id: user.student_id,
-        ...expenseForm,
-        amount: parseFloat(expenseForm.amount)
+        title: expenseForm.title,
+        amount: parseFloat(expenseForm.amount),
+        category: expenseForm.category,
+        date: expenseForm.date
       });
       setExpenseForm({ title: "", amount: "", category: categories[0] || "Food", date: new Date().toISOString().split('T')[0] });
-      fetchDashboardData(user.student_id);
+      // Trigger instant state refresh across Dashboard, Calendar, Ledger Feed, and Analytics
+      await fetchExpenses(user.student_id);
+      await fetchDashboardData(user.student_id);
     } catch (err) {
-      alert("Failed to log expense record.");
+      alert("Failed to log expense record. Please verify all input parameters.");
     }
   };
 
-  // Set Budget Ceiling Limits
+  // Budget Payload Alignment Fix: { student_id, category, limit }
   const handleSetBudget = async (e) => {
     e.preventDefault();
     if (!budgetForm.limit) return;
@@ -255,13 +303,13 @@ export default function App() {
         limit: parseFloat(budgetForm.limit)
       });
       setBudgetForm({ category: categories[0] || "Food", limit: "" });
-      fetchDashboardData(user.student_id);
+      await fetchDashboardData(user.student_id);
     } catch (err) {
       alert("Failed to save budget limit.");
     }
   };
 
-  // Savings target jar creations
+  // Savings Goal Creation
   const handleAddSavingsGoal = async (e) => {
     e.preventDefault();
     if (!savingsForm.goal_name || !savingsForm.target_amount) return;
@@ -273,12 +321,13 @@ export default function App() {
         current_saved: 0
       });
       setSavingsForm({ goal_name: "", target_amount: "" });
-      fetchDashboardData(user.student_id);
+      await fetchDashboardData(user.student_id);
     } catch (err) {
       alert("Failed to construct new savings goal.");
     }
   };
 
+  // Savings Deposit Payload Alignment Fix: { student_id, id, amount }
   const handleDepositSavings = async (goalId, amountStr, current, target) => {
     const amount = parseFloat(amountStr);
     if (isNaN(amount) || amount <= 0) return;
@@ -289,7 +338,7 @@ export default function App() {
         amount: amount
       });
       setDepositAmounts(prev => ({ ...prev, [goalId]: "" }));
-      fetchDashboardData(user.student_id);
+      await fetchDashboardData(user.student_id);
       if (res.data.current_saved >= target) {
         triggerConfetti();
       }
@@ -310,7 +359,7 @@ export default function App() {
         password: profileForm.password || undefined
       });
       alert("Profile updated successfully!");
-      localStorage.setItem("up_user", JSON.stringify(res.data.user));
+      localStorage.setItem("unipocket_user", JSON.stringify(res.data.user));
       setUser(res.data.user);
       setProfileForm(prev => ({ ...prev, password: "" }));
     } catch (err) {
@@ -341,10 +390,17 @@ export default function App() {
     }
   };
 
-  // Month-wise Filtering Calculations
-  const filteredExpenses = expenses.filter(item => item.date.startsWith(selectedMonth));
+  // Month-wise Filtering & Financial KPI Calculations
+  const filteredExpenses = expenses.filter(item => item.date && item.date.startsWith(selectedMonth));
   const monthlyTotalSpent = filteredExpenses.reduce((sum, item) => sum + parseFloat(item.amount), 0);
   
+  const totalBudgetCap = budgets.reduce((sum, item) => sum + parseFloat(item.amount_limit), 0);
+  const remainingBudget = Math.max(0, totalBudgetCap - monthlyTotalSpent);
+
+  const totalSaved = savings.reduce((sum, item) => sum + parseFloat(item.current_saved), 0);
+  const totalSavingsTarget = savings.reduce((sum, item) => sum + parseFloat(item.target_amount), 0);
+  const overallSavingsProgress = totalSavingsTarget > 0 ? Math.min(100, (totalSaved / totalSavingsTarget) * 100) : 0;
+
   const categoryDataMap = filteredExpenses.reduce((acc, curr) => {
     acc[curr.category] = (acc[curr.category] || 0) + parseFloat(curr.amount);
     return acc;
@@ -355,7 +411,7 @@ export default function App() {
     amount: categoryDataMap[key]
   }));
 
-  const colors = ["#ccff00", "#00ffff", "#ff66cc", "#ff9933", "#9933ff"];
+  const colors = ["#ccff00", "#06b6d4", "#8b5cf6", "#f97316", "#ec4899", "#10b981"];
 
   // Monthly Calendar Calculations
   const getCalendarDays = () => {
@@ -364,8 +420,8 @@ export default function App() {
     const year = parseInt(yearStr);
     const month = parseInt(monthStr);
 
-    const firstDay = new Date(year, month - 1, 1).getDay(); // Weekday starting index
-    const totalDays = new Date(year, month, 0).getDate(); // Days count
+    const firstDay = new Date(year, month - 1, 1).getDay();
+    const totalDays = new Date(year, month, 0).getDate();
 
     const days = [];
     for (let i = 0; i < firstDay; i++) {
@@ -378,7 +434,6 @@ export default function App() {
     return days;
   };
 
-  // Group daily spent amounts for current month
   const dailySpending = filteredExpenses.reduce((acc, curr) => {
     acc[curr.date] = (acc[curr.date] || 0) + parseFloat(curr.amount);
     return acc;
@@ -386,55 +441,62 @@ export default function App() {
 
   const calendarDays = getCalendarDays();
 
-  // Authentication Layout (Sign-in / Sign-up)
+  // Authentication Screen
   if (!user) {
     return (
-      <div className="app-container" style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
-        <div className="nb-card" style={{ width: "100%", maxWidth: "420px", padding: "30px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px" }}>
-            <Wallet size={36} weight="fill" />
-            <h1 style={{ margin: 0, fontSize: "28px" }}>UniPocket</h1>
+      <div className="app-container" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
+        <div className="nb-card" style={{ width: "100%", maxWidth: "440px", padding: "32px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+            <div style={{ background: "var(--primary)", padding: "10px", borderRadius: "10px", display: "flex", border: "2px solid #000" }}>
+              <Wallet size={32} weight="fill" style={{ color: "#000000" }} />
+            </div>
+            <div>
+              <h1 style={{ margin: 0, fontSize: "28px" }}>UniPocket</h1>
+              <span style={{ fontSize: "12px", fontWeight: "700", opacity: 0.8 }}>STUDENT FINANCIAL SUITE</span>
+            </div>
           </div>
-          <p style={{ fontWeight: "bold", marginBottom: "20px" }}>Smart Neo-Brutalist Ledger for College Students</p>
+          <p style={{ fontSize: "14px", lineHeight: "1.5", color: "var(--fg)", marginBottom: "24px" }}>
+            Responsive multi-tab platform for intelligent budget tracking, visual savings goals, and real-time AI guidance.
+          </p>
           
-          {errorMsg && <div style={{ background: "#ff3366", color: "#fff", padding: "10px", border: "2px solid #000", fontWeight: "bold", marginBottom: "15px" }}>{errorMsg}</div>}
+          {errorMsg && <div style={{ background: "var(--destructive)", color: "#fff", padding: "12px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px", marginBottom: "18px" }}>{errorMsg}</div>}
 
-          <form onSubmit={handleAuthSubmit}>
+          <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             {authMode === "signup" && (
               <>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "4px" }}>Full Name</label>
+                <div>
+                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Full Name</label>
                   <input type="text" className="nb-input" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} />
                 </div>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "4px" }}>Student ID</label>
+                <div>
+                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Student ID</label>
                   <input type="text" className="nb-input" placeholder="e.g. STU123" required value={authForm.student_id} onChange={e => setAuthForm({...authForm, student_id: e.target.value})} />
                 </div>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "4px" }}>Contact Number</label>
+                <div>
+                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Contact Number</label>
                   <input type="text" className="nb-input" placeholder="e.g. +9199887766" value={authForm.contact_number} onChange={e => setAuthForm({...authForm, contact_number: e.target.value})} />
                 </div>
               </>
             )}
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", fontWeight: "bold", marginBottom: "4px" }}>College Email</label>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
               <input type="email" className="nb-input" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} />
             </div>
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", fontWeight: "bold", marginBottom: "4px" }}>Password</label>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Password</label>
               <input type="password" className="nb-input" required value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} />
             </div>
 
-            <button type="submit" className="nb-btn" style={{ width: "100%", padding: "12px", fontSize: "16px" }}>
-              {authMode === "login" ? <><SignIn size={18} weight="bold"/> Enter Dashboard</> : <><UserPlus size={18} weight="bold"/> Initialize Profile</>}
+            <button type="submit" className="nb-btn" style={{ padding: "12px", fontSize: "15px", marginTop: "10px" }}>
+              {authMode === "login" ? <><SignIn size={18} weight="bold"/> Enter Platform</> : <><UserPlus size={18} weight="bold"/> Create Profile</>}
             </button>
           </form>
 
-          <div style={{ textAlign: "center", marginTop: "20px" }}>
+          <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "16px", borderTop: "2px dashed var(--border)" }}>
             {authMode === "login" ? (
-              <span style={{ cursor: "pointer", textDecoration: "underline", fontSize: "14px" }} onClick={() => setAuthMode("signup")}>New user? Establish localized profile here</span>
+              <span style={{ cursor: "pointer", fontWeight: "700", fontSize: "13px", color: "var(--accent)" }} onClick={() => setAuthMode("signup")}>New student? Register your account here →</span>
             ) : (
-              <span style={{ cursor: "pointer", textDecoration: "underline", fontSize: "14px" }} onClick={() => setAuthMode("login")}>Already registered? Login instead</span>
+              <span style={{ cursor: "pointer", fontWeight: "700", fontSize: "13px", color: "var(--accent)" }} onClick={() => setAuthMode("login")}>Already registered? Login to account →</span>
             )}
           </div>
         </div>
@@ -442,10 +504,10 @@ export default function App() {
     );
   }
 
-  // Task-Wise Setup Wizard Onboarding Overlay
+  // Initial Onboarding Setup Wizard Overlay
   if (!isSetupComplete) {
     return (
-      <div className="app-container" style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+      <div className="app-container" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
         <div className="setup-box">
           <div className="setup-stepper-header">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Initial Setup Wizard</h2>
@@ -459,8 +521,8 @@ export default function App() {
           {setupStep === 1 && (
             <div>
               <h3>Step 1: Custom Categories</h3>
-              <p style={{ fontSize: "13px", lineHeight: "1.4", marginBottom: "15px" }}>
-                Add your own custom spending categories or manage defaults. We have default categories set up for you.
+              <p style={{ fontSize: "13px", lineHeight: "1.5", marginBottom: "16px" }}>
+                Add your own custom spending categories or use defaults.
               </p>
               
               <form onSubmit={async (e) => {
@@ -469,7 +531,7 @@ export default function App() {
                   await addCategorySilent(newCategoryInput.trim());
                   setNewCategoryInput("");
                 }
-              }} style={{ display: "flex", gap: "8px", marginBottom: "15px" }}>
+              }} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
                 <input 
                   type="text" 
                   placeholder="New Category Name" 
@@ -477,24 +539,24 @@ export default function App() {
                   value={newCategoryInput} 
                   onChange={e => setNewCategoryInput(e.target.value)} 
                 />
-                <button type="submit" className="nb-btn" style={{ padding: "10px" }}><Plus size={18} /></button>
+                <button type="submit" className="nb-btn" style={{ padding: "10px 14px" }}><Plus size={18} /></button>
               </form>
 
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "25px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "24px" }}>
                 {categories.map((c, i) => (
-                  <span key={i} className="sticker cyan" style={{ fontSize: "11px" }}>{c}</span>
+                  <span key={i} className="sticker cyan" style={{ fontSize: "12px" }}>{c}</span>
                 ))}
               </div>
 
-              <button className="nb-btn" style={{ width: "100%" }} onClick={() => setSetupStep(2)}>Next: Configure Budgets</button>
+              <button className="nb-btn" style={{ width: "100%" }} onClick={() => setSetupStep(2)}>Next: Configure Budgets →</button>
             </div>
           )}
 
           {setupStep === 2 && (
             <div>
               <h3>Step 2: Assign Budget Limits</h3>
-              <p style={{ fontSize: "13px", lineHeight: "1.4", marginBottom: "15px" }}>
-                Set monthly limits for your categories so we can warn you of overspending leaks.
+              <p style={{ fontSize: "13px", lineHeight: "1.5", marginBottom: "16px" }}>
+                Set monthly limit caps for spending categories to prevent budget leaks.
               </p>
 
               <form onSubmit={handleSetBudget} style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
@@ -513,7 +575,7 @@ export default function App() {
                 <button type="submit" className="nb-btn">Apply</button>
               </form>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "150px", overflowY: "auto", marginBottom: "25px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "150px", overflowY: "auto", marginBottom: "24px" }}>
                 {budgets.length === 0 && <p style={{ fontSize: "12px", opacity: 0.7 }}>No caps set yet.</p>}
                 {budgets.map((b, idx) => (
                   <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", borderBottom: "1px dashed var(--border)", paddingBottom: "4px" }}>
@@ -524,8 +586,8 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", gap: "10px" }}>
-                <button className="nb-btn" style={{ background: "var(--muted)", flex: 1 }} onClick={() => setSetupStep(1)}>Back</button>
-                <button className="nb-btn" style={{ flex: 2 }} onClick={() => setSetupStep(3)}>Next: Finalize</button>
+                <button className="nb-btn" style={{ background: "var(--muted)", color: "var(--fg)", flex: 1 }} onClick={() => setSetupStep(1)}>Back</button>
+                <button className="nb-btn" style={{ flex: 2 }} onClick={() => setSetupStep(3)}>Next: Finalize →</button>
               </div>
             </div>
           )}
@@ -533,10 +595,10 @@ export default function App() {
           {setupStep === 3 && (
             <div style={{ textAlign: "center" }}>
               <h3>Step 3: Setup Completed!</h3>
-              <p style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "25px" }}>
-                Perfect! You've configured your initial setup constraints. Let's redirect you to the main dashboard.
+              <p style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "24px" }}>
+                Awesome! Your UniPocket workspace is now configured. Welcome aboard!
               </p>
-              <button className="nb-btn" style={{ width: "100%" }} onClick={() => setIsSetupComplete(true)}>Lesgo! Launch Dashboard</button>
+              <button className="nb-btn" style={{ width: "100%" }} onClick={() => setIsSetupComplete(true)}>🚀 Launch Platform</button>
             </div>
           )}
         </div>
@@ -544,31 +606,59 @@ export default function App() {
     );
   }
 
-  // Main Stack layout
   return (
     <div className="app-container">
-      {/* HEADER SECTION */}
-      <header className="nb-card" style={{ padding: "15px 20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Wallet size={28} weight="fill" />
-            <h2 style={{ margin: 0, fontSize: "20px" }}>UniPocket</h2>
+      {/* HEADER SECTION & TOP TAB NAVIGATION */}
+      <header className="nb-card header-card">
+        <div className="header-top">
+          <div className="brand-title">
+            <div style={{ background: "var(--primary)", padding: "8px", borderRadius: "10px", display: "flex", border: "2px solid var(--border)" }}>
+              <Wallet size={26} weight="fill" style={{ color: "#000000" }} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: "24px", margin: 0 }}>UniPocket</h1>
+              <span style={{ fontSize: "11px", fontWeight: "700", opacity: 0.8, letterSpacing: "0.05em" }}>WELCOME, {user.name.toUpperCase()}</span>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <button className="nb-btn" style={{ background: "var(--muted)", padding: "6px", width: "36px", height: "36px", boxShadow: "2px 2px 0px var(--border)" }} onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+
+          <div className="header-actions">
+            <button 
+              className="nb-btn" 
+              style={{ background: "var(--muted)", color: "var(--fg)", padding: "8px 12px", fontSize: "13px" }}
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            >
+              {theme === "light" ? <><Moon size={16} /> Dark</> : <><Sun size={16} /> Light</>}
             </button>
-            <button className="nb-btn destruct" style={{ padding: "6px 12px", fontSize: "12px" }} onClick={handleLogout}>
-              <SignOut size={16} /> Exit
+            
+            <button 
+              className="nb-btn"
+              style={{ background: activeTab === "profile" ? "var(--accent)" : "var(--muted)", color: activeTab === "profile" ? "#000" : "var(--fg)", padding: "8px 14px", fontSize: "13px" }}
+              onClick={() => setActiveTab("profile")}
+            >
+              <User size={16} weight="bold" /> Profile
+            </button>
+
+            <button className="nb-btn destruct" style={{ padding: "8px 14px", fontSize: "13px" }} onClick={handleLogout}>
+              <SignOut size={16} weight="bold" /> Exit
             </button>
           </div>
         </div>
 
-        {/* TABS SELECTOR */}
-        <div className="tabs-navigation">
-          <button className={`tab-button ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}><CalendarBlank size={16} /> Dashboard</button>
-          <button className={`tab-button ${activeTab === "profile" ? "active" : ""}`} onClick={() => setActiveTab("profile")}><User size={16} /> Profile</button>
-        </div>
+        {/* TOP TAB NAVIGATION BAR */}
+        <nav className="tabs-navigation">
+          <button className={`tab-button ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}>
+            <CalendarBlank size={18} weight="bold" /> Dashboard
+          </button>
+          <button className={`tab-button ${activeTab === "transactions" ? "active" : ""}`} onClick={() => setActiveTab("transactions")}>
+            <Receipt size={18} weight="bold" /> Transactions & Ledger
+          </button>
+          <button className={`tab-button ${activeTab === "budgets" ? "active" : ""}`} onClick={() => setActiveTab("budgets")}>
+            <PiggyBank size={18} weight="bold" /> Budgets & Savings
+          </button>
+          <button className={`tab-button ${activeTab === "analytics" ? "active" : ""}`} onClick={() => setActiveTab("analytics")}>
+            <ChartBar size={18} weight="bold" /> Analytics & Matrix
+          </button>
+        </nav>
       </header>
 
       {/* DYNAMIC ALERT BANNER */}
@@ -579,111 +669,246 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "profile" ? (
-        /* PROFILE MANAGER TAB */
-        <div className="nb-card">
-          <h3 style={{ borderBottom: "2px solid var(--border)", paddingBottom: "10px" }}>USER PROFILE SETTINGS 👤</h3>
-          <form onSubmit={handleUpdateProfileSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "13px", marginBottom: "4px" }}>Full Name</label>
-              <input type="text" className="nb-input" required value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "13px", marginBottom: "4px" }}>College Email</label>
-              <input type="email" className="nb-input" required value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "13px", marginBottom: "4px" }}>Contact Number</label>
-              <input type="text" className="nb-input" value={profileForm.contact_number} onChange={e => setProfileForm({...profileForm, contact_number: e.target.value})} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "13px", marginBottom: "4px" }}>New Password (Leave blank to keep current)</label>
-              <input type="password" className="nb-input" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} />
-            </div>
-            <button type="submit" className="nb-btn" style={{ marginTop: "10px" }}>Update Profile Details</button>
-          </form>
-        </div>
-      ) : (
-        /* MAIN DASHBOARD SCROLL FLOW (Vertical Stack Order Swapped: Budgets before transaction) */
-        <>
-          {/* MONTH FILTER BAR */}
-          <div className="nb-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-            <div>
-              <span style={{ fontSize: "12px", fontWeight: "bold", display: "block", opacity: 0.8 }}>SELECT ACCOUNTING PERIOD 📅</span>
-              <input 
-                type="month" 
-                className="nb-input" 
-                style={{ width: "170px", padding: "6px", boxShadow: "1px 1px 0 var(--border)", fontSize: "14px" }}
-                value={selectedMonth} 
-                onChange={e => setSelectedMonth(e.target.value)} 
-              />
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span style={{ fontSize: "12px", fontWeight: "bold", display: "block", opacity: 0.8 }}>TOTAL MONTHLY SPENDING 💳</span>
-              <h2 style={{ fontSize: "28px", margin: 0, color: "var(--destructive)" }}>₹{monthlyTotalSpent.toFixed(2)}</h2>
-            </div>
-          </div>
-
-          {/* MONTHLY CALENDAR GRID VISUALIZER */}
-          <div className="nb-card calendar-container">
-            <h3 style={{ margin: 0 }}>MONTHLY EXPENSES GRID 📅</h3>
-            <div className="calendar-grid">
-              <div className="calendar-weekday-bar">
-                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+      {/* TAB 1: DASHBOARD (OVERVIEW) */}
+      {activeTab === "dashboard" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          {/* AI INSIGHT BANNER */}
+          <div className={`ai-banner ${isBreachedState ? "breached" : ""}`}>
+            <div className="ai-banner-content">
+              <div style={{ background: isBreachedState ? "var(--destructive)" : "var(--primary)", padding: "8px", borderRadius: "8px", border: "2px solid #000" }}>
+                <Sparkle size={24} weight="fill" style={{ color: isBreachedState ? "#ffffff" : "#000000" }} />
               </div>
-              {calendarDays.map((box, idx) => {
-                const isDayEmpty = box.day === null;
-                const spentToday = !isDayEmpty && dailySpending[box.dateString] ? dailySpending[box.dateString] : 0;
-                
-                return (
-                  <div key={idx} className={`calendar-day-cell ${isDayEmpty ? "empty" : ""}`}>
-                    <span className="calendar-day-num">{box.day}</span>
-                    {spentToday > 0 && (
-                      <span className="calendar-day-spent" title={`Total: ₹${spentToday}`}>
-                        ₹{spentToday}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
+              <div>
+                <span style={{ fontSize: "11px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.05em", color: isBreachedState ? "var(--destructive)" : "var(--accent)" }}>
+                  {isBreachedState ? "⚠️ CRITICAL BUDGET BREACH WARNING" : "LIVE AI MONEY INSIGHT"}
+                </span>
+                <div className="ai-banner-text">{aiTip}</div>
+              </div>
+            </div>
+            <button className="nb-btn" style={{ padding: "6px 12px", fontSize: "12px", background: "var(--card)", color: "var(--fg)" }} onClick={fetchAiTip} disabled={aiTipLoading}>
+              <ArrowsClockwise size={14} className={aiTipLoading ? "spin" : ""} /> Refresh
+            </button>
+          </div>
+
+          {/* TOP KPI ROW */}
+          <div className="kpi-grid">
+            <div className="kpi-card">
+              <div className="kpi-card-header">
+                <span className="kpi-title">Monthly Outflow</span>
+                <div className="kpi-icon" style={{ background: "rgba(239, 68, 68, 0.15)", color: "var(--destructive)" }}>
+                  <ArrowUpRight size={22} weight="bold" />
+                </div>
+              </div>
+              <div>
+                <h2 className="kpi-value" style={{ color: "var(--destructive)" }}>₹{monthlyTotalSpent.toFixed(2)}</h2>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>Period: {selectedMonth}</span>
+              </div>
+            </div>
+
+            <div className="kpi-card">
+              <div className="kpi-card-header">
+                <span className="kpi-title">Remaining Budget</span>
+                <div className="kpi-icon" style={{ background: "rgba(6, 182, 212, 0.15)", color: "var(--accent)" }}>
+                  <Compass size={22} weight="bold" />
+                </div>
+              </div>
+              <div>
+                <h2 className="kpi-value" style={{ color: "var(--accent)" }}>₹{remainingBudget.toFixed(2)}</h2>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>Out of ₹{totalBudgetCap.toFixed(0)} configured limits</span>
+              </div>
+            </div>
+
+            <div className="kpi-card">
+              <div className="kpi-card-header">
+                <span className="kpi-title">Savings Goal Progress</span>
+                <div className="kpi-icon" style={{ background: "rgba(204, 255, 0, 0.15)", color: "var(--primary)" }}>
+                  <Target size={22} weight="bold" />
+                </div>
+              </div>
+              <div>
+                <h2 className="kpi-value" style={{ color: "var(--primary)" }}>₹{totalSaved.toFixed(0)} <span style={{ fontSize: "14px", color: "var(--fg)", opacity: 0.6 }}>/ ₹{totalSavingsTarget.toFixed(0)}</span></h2>
+                <div className="bar-track" style={{ marginTop: "8px" }}>
+                  <div className="bar-fill" style={{ width: `${overallSavingsProgress}%`, background: "var(--primary)" }} />
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* BUDGET PLANNING PANELS (Swapped to be before Transaction Form) */}
+          {/* MONTHLY CALENDAR GRID */}
+          <div className="nb-card calendar-container">
+            <div className="calendar-header">
+              <div>
+                <h3 style={{ margin: 0 }}>MONTHLY EXPENSES CALENDAR 📅</h3>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>Visual breakdown of daily cash outflows</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold" }}>Month:</span>
+                <input 
+                  type="month" 
+                  className="nb-input" 
+                  style={{ width: "170px", padding: "6px 10px", fontSize: "13px" }}
+                  value={selectedMonth} 
+                  onChange={e => setSelectedMonth(e.target.value)} 
+                />
+              </div>
+            </div>
+
+            <div className="calendar-grid-wrapper">
+              <div className="calendar-grid">
+                <div className="calendar-weekday-bar">
+                  <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                {calendarDays.map((box, idx) => {
+                  const isDayEmpty = box.day === null;
+                  const spentToday = !isDayEmpty && dailySpending[box.dateString] ? dailySpending[box.dateString] : 0;
+                  
+                  return (
+                    <div key={idx} className={`calendar-day-cell ${isDayEmpty ? "empty" : ""}`}>
+                      <span className="calendar-day-num">{box.day}</span>
+                      {spentToday > 0 && (
+                        <span className="calendar-day-spent" title={`Date: ${box.dateString} - Total spent: ₹${spentToday}`}>
+                          ₹{spentToday}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: TRANSACTIONS & LEDGER */}
+      {activeTab === "transactions" && (
+        <div className="grid-2col">
+          {/* LEFT COLUMN: RECORD NEW TRANSACTION FORM */}
           <div className="nb-card">
-            <h3 style={{ margin: "0 0 12px 0" }}>SET CATEGORIZED BUDGET CAPS 🎯</h3>
-            <form onSubmit={handleSetBudget} style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "15px" }}>
-              {/* Category creation modes tab inside the budget block */}
+            <h3 style={{ margin: "0 0 16px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+              <PlusCircle size={22} weight="bold" style={{ color: "var(--primary)" }} /> RECORD NEW TRANSACTION
+            </h3>
+            
+            <form onSubmit={handleAddExpense} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div>
+                <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Transaction Title</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. Textbook purchase, Campus lunch" 
+                  className="nb-input" 
+                  required 
+                  value={expenseForm.title} 
+                  onChange={e => setExpenseForm({...expenseForm, title: e.target.value})} 
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "12px" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Amount (INR ₹)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    placeholder="0.00" 
+                    className="nb-input" 
+                    required 
+                    value={expenseForm.amount} 
+                    onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} 
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Category</label>
+                  <select className="nb-select" value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}>
+                    {categories.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Transaction Date</label>
+                <input 
+                  type="date" 
+                  className="nb-input" 
+                  required 
+                  value={expenseForm.date} 
+                  onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} 
+                />
+              </div>
+
+              <button type="submit" className="nb-btn" style={{ marginTop: "6px" }}>
+                <Receipt size={18} weight="bold" /> Log Expense Record
+              </button>
+            </form>
+          </div>
+
+          {/* RIGHT COLUMN: HISTORICAL LEDGER FEED */}
+          <div className="nb-card" style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ margin: 0 }}>HISTORICAL LEDGER FEED 📜</h3>
+              <span className="sticker cyan">{filteredExpenses.length} Records</span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "500px", overflowY: "auto", paddingRight: "4px" }}>
+              {filteredExpenses.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 20px", border: "2px dashed var(--border)", borderRadius: "8px" }}>
+                  <Receipt size={40} style={{ opacity: 0.4, marginBottom: "8px" }} />
+                  <p style={{ fontSize: "14px", fontWeight: "600", opacity: 0.8, margin: 0 }}>No transactions recorded for this period yet.</p>
+                  <p style={{ fontSize: "12px", opacity: 0.6, marginTop: "4px" }}>Use the form on the left to record your first outflow!</p>
+                </div>
+              ) : (
+                filteredExpenses.map((item, idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "var(--muted)", border: "2px solid var(--border)", borderRadius: "8px", boxShadow: "2px 2px 0px var(--shadow)" }}>
+                    <div>
+                      <div style={{ fontWeight: "700", fontSize: "14px" }}>{item.title}</div>
+                      <div style={{ fontSize: "11px", opacity: 0.7, marginTop: "2px" }}>
+                        {item.date} • <span className="sticker pink" style={{ fontSize: "10px", padding: "2px 6px" }}>{item.category}</span>
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: "900", fontSize: "16px", color: "var(--destructive)", fontFamily: "Space Grotesk" }}>
+                      -₹{parseFloat(item.amount).toFixed(2)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: BUDGETS & SAVINGS JARS */}
+      {activeTab === "budgets" && (
+        <div className="grid-2col">
+          {/* LEFT COLUMN: SET CATEGORIZED BUDGET CAPS */}
+          <div className="nb-card">
+            <h3 style={{ margin: "0 0 16px 0" }}>SET CATEGORIZED BUDGET CAPS 🎯</h3>
+            
+            <form onSubmit={handleSetBudget} style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button 
                   type="button"
                   className="nb-btn" 
                   style={{ 
                     flex: 1, 
-                    padding: "6px", 
+                    padding: "8px", 
                     fontSize: "12px", 
-                    background: budgetCategoryMode === "select" ? "var(--primary)" : "var(--card)", 
-                    color: budgetCategoryMode === "select" ? "#000000" : "var(--fg)",
-                    boxShadow: "1px 1px 0 var(--border)"
+                    background: budgetCategoryMode === "select" ? "var(--primary)" : "var(--muted)", 
+                    color: budgetCategoryMode === "select" ? "#000000" : "var(--fg)"
                   }}
                   onClick={() => setBudgetCategoryMode("select")}
                 >
-                  Select Existing Category
+                  Select Category
                 </button>
                 <button 
                   type="button"
                   className="nb-btn" 
                   style={{ 
                     flex: 1, 
-                    padding: "6px", 
+                    padding: "8px", 
                     fontSize: "12px", 
-                    background: budgetCategoryMode === "custom" ? "var(--primary)" : "var(--card)", 
-                    color: budgetCategoryMode === "custom" ? "#000000" : "var(--fg)",
-                    boxShadow: "1px 1px 0 var(--border)"
+                    background: budgetCategoryMode === "custom" ? "var(--primary)" : "var(--muted)", 
+                    color: budgetCategoryMode === "custom" ? "#000000" : "var(--fg)"
                   }}
                   onClick={() => setBudgetCategoryMode("custom")}
                 >
-                  + Add Custom Category
+                  + Custom Category
                 </button>
               </div>
 
@@ -708,52 +933,43 @@ export default function App() {
               <button type="submit" className="nb-btn">Apply Budget Cap</button>
             </form>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <h4 style={{ fontSize: "14px", borderBottom: "2px dashed var(--border)", paddingBottom: "8px", marginBottom: "12px" }}>ACTIVE CATEGORY BUDGET METERS</h4>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {budgets.length === 0 && <p style={{ fontSize: "13px", opacity: 0.7 }}>No active budget limits configured yet.</p>}
               {budgets.map((b, idx) => {
                 const currentSpent = categoryDataMap[b.category] || 0;
                 const ratio = Math.min((currentSpent / b.amount_limit) * 100, 100);
+                const isBreached = currentSpent > b.amount_limit;
+                
                 return (
-                  <div key={idx} style={{ fontSize: "13px" }}>
+                  <div key={idx} style={{ fontSize: "13px", padding: "10px", background: "var(--muted)", border: "2px solid var(--border)", borderRadius: "8px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", marginBottom: "4px" }}>
                       <span>{b.category}</span>
-                      <span>₹{currentSpent} / ₹{parseFloat(b.amount_limit).toFixed(0)}</span>
+                      <span style={{ color: isBreached ? "var(--destructive)" : "var(--fg)" }}>
+                        ₹{currentSpent.toFixed(0)} / ₹{parseFloat(b.amount_limit).toFixed(0)}
+                      </span>
                     </div>
                     <div className="bar-track">
-                      <div className="bar-fill" style={{ width: `${ratio}%`, background: ratio >= 100 ? "var(--destructive)" : "var(--accent)" }} />
+                      <div className="bar-fill" style={{ width: `${ratio}%`, background: isBreached ? "var(--destructive)" : "var(--primary)" }} />
                     </div>
+                    {isBreached && <div style={{ color: "var(--destructive)", fontSize: "11px", fontWeight: "bold", marginTop: "4px" }}>⚠️ Cap exceeded by ₹{(currentSpent - b.amount_limit).toFixed(0)}!</div>}
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* EXPENSE LOGGING FORM */}
+          {/* RIGHT COLUMN: SAVINGS GOAL JARS CONTAINER */}
           <div className="nb-card">
-            <h3 style={{ margin: "0 0 12px 0", display: "flex", alignItems: "center", gap: "6px" }}>RECORD NEW TRANSACTION 💸</h3>
-            <form onSubmit={handleAddExpense} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <input type="text" placeholder="Expense Title (e.g. Bus ticket)" className="nb-input" style={{ flex: 2 }} required value={expenseForm.title} onChange={e => setExpenseForm({...expenseForm, title: e.target.value})} />
-                <input type="number" placeholder="Amount (INR)" className="nb-input" style={{ flex: 1 }} required value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <select className="nb-select" style={{ flex: 1 }} value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}>
-                  {categories.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
-                </select>
-                <input type="date" className="nb-input" style={{ flex: 1 }} required value={expenseForm.date} onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} />
-              </div>
-              <button type="submit" className="nb-btn">Execute Transaction Log</button>
-            </form>
-          </div>
-
-          {/* SAVINGS GOALS & JARS */}
-          <div className="nb-card">
-            <h3 style={{ margin: "0 0 12px 0", display: "flex", alignItems: "center", gap: "6px" }}>
-              SAVINGS GOAL JARS 🍯
+            <h3 style={{ margin: "0 0 16px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+              <PiggyBank size={24} weight="bold" style={{ color: "var(--accent)" }} /> SAVINGS GOAL JARS 🍯
             </h3>
-            <form onSubmit={handleAddSavingsGoal} style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+
+            <form onSubmit={handleAddSavingsGoal} style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
               <input 
                 type="text" 
-                placeholder="Goal (e.g. Laptop)" 
+                placeholder="Goal (e.g. Laptop, Trip)" 
                 className="nb-input" 
                 style={{ flex: 2 }} 
                 required 
@@ -773,7 +989,9 @@ export default function App() {
             </form>
 
             {savings.length === 0 ? (
-              <p style={{ fontSize: "13px", opacity: 0.8 }}>No active savings goals found.</p>
+              <div style={{ textAlign: "center", padding: "30px", border: "2px dashed var(--border)", borderRadius: "8px" }}>
+                <p style={{ fontSize: "13px", opacity: 0.7, margin: 0 }}>No active savings goals found. Create your first jar above!</p>
+              </div>
             ) : (
               <div className="jar-grid">
                 {savings.map((s, idx) => {
@@ -792,9 +1010,9 @@ export default function App() {
                           style={{ height: `${ratio}%` }} 
                         />
                       </div>
-                      <div style={{ fontWeight: "bold", fontSize: "13px", marginTop: "4px" }}>{s.goal_name}</div>
-                      <div style={{ fontSize: "11px", opacity: 0.7, marginBottom: "8px" }}>
-                        ₹{current.toFixed(0)}/₹{target.toFixed(0)}
+                      <div style={{ fontWeight: "700", fontSize: "13px", marginTop: "4px" }}>{s.goal_name}</div>
+                      <div style={{ fontSize: "11px", opacity: 0.8, marginBottom: "8px" }}>
+                        ₹{current.toFixed(0)} / ₹{target.toFixed(0)}
                       </div>
                       
                       {!isCompleted && (
@@ -803,21 +1021,21 @@ export default function App() {
                             type="number" 
                             placeholder="₹" 
                             className="nb-input" 
-                            style={{ padding: "4px 6px", fontSize: "11px", height: "26px", minWidth: "0" }}
+                            style={{ padding: "4px 6px", fontSize: "11px", height: "28px", minWidth: "0" }}
                             value={depositAmounts[s.id] || ""}
                             onChange={e => setDepositAmounts({ ...depositAmounts, [s.id]: e.target.value })}
                           />
                           <button 
                             onClick={() => handleDepositSavings(s.id, depositAmounts[s.id], current, target)} 
                             className="nb-btn" 
-                            style={{ padding: "4px 8px", fontSize: "10px", height: "26px" }}
+                            style={{ padding: "4px 8px", fontSize: "10px", height: "28px" }}
                           >
-                            Add
+                            Deposit
                           </button>
                         </div>
                       )}
                       {isCompleted && (
-                        <span className="sticker pink" style={{ fontSize: "9px", padding: "3px", width: "100%", boxSizing: "border-box" }}>
+                        <span className="sticker pink" style={{ fontSize: "10px", padding: "4px", width: "100%", textAlign: "center" }}>
                           🎉 GOAL MET!
                         </span>
                       )}
@@ -827,20 +1045,32 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          {/* SPENDING DISTRIBUTION MATRIX */}
+      {/* TAB 4: ANALYTICS & DISTRIBUTION MATRIX */}
+      {activeTab === "analytics" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           <div className="nb-card">
-            <h3 style={{ margin: "0 0 12px 0" }}>SPENDING DISTRIBUTION MATRIX 📊</h3>
+            <h3 style={{ margin: "0 0 16px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+              <ChartBar size={24} weight="bold" style={{ color: "var(--primary)" }} /> SPENDING DISTRIBUTION MATRIX 📊
+            </h3>
+            
             {chartData.length === 0 ? (
-              <p style={{ textAlign: "center", color: "#888", fontSize: "13px" }}>No transactions mapped for this period.</p>
+              <div style={{ textAlign: "center", padding: "40px", border: "2px dashed var(--border)", borderRadius: "8px" }}>
+                <p style={{ color: "var(--fg)", opacity: 0.7, fontSize: "14px" }}>No transactions mapped for this period to render matrix.</p>
+              </div>
             ) : (
-              <div style={{ width: "100%", height: "200px" }}>
+              <div style={{ width: "100%", height: "260px" }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <XAxis dataKey="category" stroke="var(--fg)" tick={{ fontSize: 11, fontWeight: "bold" }} />
-                    <YAxis stroke="var(--fg)" tick={{ fontSize: 11, fontWeight: "bold" }} />
-                    <Tooltip cursor={{ fill: 'rgba(0,0,0,0.03)' }} contentStyle={{ background: 'var(--card)', border: '2px solid var(--border)', fontFamily: 'monospace' }} />
-                    <Bar dataKey="amount" fill="#ccff00" stroke="var(--border)" strokeWidth={2}>
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <XAxis dataKey="category" stroke="var(--fg)" tick={{ fontSize: 12, fontWeight: "bold" }} />
+                    <YAxis stroke="var(--fg)" tick={{ fontSize: 12, fontWeight: "bold" }} />
+                    <Tooltip 
+                      cursor={{ fill: 'rgba(255,255,255,0.05)' }} 
+                      contentStyle={{ background: 'var(--card)', border: '2px solid var(--border)', borderRadius: '8px', fontFamily: 'Space Grotesk' }} 
+                    />
+                    <Bar dataKey="amount" fill="#ccff00" stroke="var(--border)" strokeWidth={2} radius={[6, 6, 0, 0]}>
                       {chartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                       ))}
@@ -851,42 +1081,77 @@ export default function App() {
             )}
           </div>
 
-          {/* HISTORICAL LEDGER FEED */}
-          <div className="nb-card" style={{ flexGrow: 1 }}>
-            <h3 style={{ margin: "0 0 12px 0" }}>HISTORICAL LEDGER FEED 📜</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "250px", overflowY: "auto" }}>
-              {filteredExpenses.length === 0 && <p style={{ fontSize: "13px" }}>No transactions recorded for this period.</p>}
-              {filteredExpenses.map((item, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", borderBottom: "2px dashed var(--border)", fontSize: "13px" }}>
-                  <div>
-                    <div style={{ fontWeight: "bold" }}>{item.title}</div>
-                    <div style={{ fontSize: "11px", opacity: 0.7 }}>{item.date} • <span style={{ textDecoration: "underline" }}>{item.category}</span></div>
-                  </div>
-                  <div style={{ fontWeight: "900", fontSize: "14px" }}>-₹{parseFloat(item.amount).toFixed(2)}</div>
-                </div>
-              ))}
-            </div>
+          {/* CATEGORY BREAKDOWN GRID */}
+          <div className="nb-card">
+            <h3 style={{ margin: "0 0 16px 0" }}>CATEGORY OUTFLOW BREAKDOWN</h3>
+            
+            {chartData.length === 0 ? (
+              <p style={{ fontSize: "13px", opacity: 0.7 }}>No breakdown data available.</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
+                {chartData.map((c, idx) => {
+                  const pct = monthlyTotalSpent > 0 ? (c.amount / monthlyTotalSpent) * 100 : 0;
+                  return (
+                    <div key={idx} style={{ padding: "16px", background: "var(--muted)", border: "2px solid var(--border)", borderRadius: "10px", boxShadow: "2px 2px 0px var(--shadow)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontWeight: "700", fontSize: "14px" }}>{c.category}</span>
+                        <span className="sticker" style={{ background: colors[idx % colors.length], color: "#000" }}>{pct.toFixed(1)}%</span>
+                      </div>
+                      <div style={{ fontSize: "20px", fontWeight: "800", fontFamily: "Space Grotesk", color: "var(--fg)" }}>
+                        ₹{c.amount.toFixed(2)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </>
+        </div>
+      )}
+
+      {/* PROFILE SETTINGS TAB */}
+      {activeTab === "profile" && (
+        <div className="nb-card" style={{ maxWidth: "600px", margin: "0 auto", width: "100%" }}>
+          <h3 style={{ borderBottom: "2px solid var(--border)", paddingBottom: "12px", marginBottom: "18px" }}>USER PROFILE SETTINGS 👤</h3>
+          <form onSubmit={handleUpdateProfileSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Full Name</label>
+              <input type="text" className="nb-input" required value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
+              <input type="email" className="nb-input" required value={profileForm.email} onChange={e => setProfileForm({...profileForm, email: e.target.value})} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Contact Number</label>
+              <input type="text" className="nb-input" value={profileForm.contact_number} onChange={e => setProfileForm({...profileForm, contact_number: e.target.value})} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>New Password (Leave blank to keep current)</label>
+              <input type="password" className="nb-input" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} />
+            </div>
+            <button type="submit" className="nb-btn" style={{ marginTop: "10px" }}>Update Profile Details</button>
+          </form>
+        </div>
       )}
 
       {/* FLOATING COLLAPSIBLE CHATBOT WIDGET */}
       <div className="chat-floating-btn" onClick={() => setChatOpen(!chatOpen)}>
-        <ChatCircleText size={28} weight="bold" style={{ color: "#000000" }} />
+        <ChatCircleText size={30} weight="fill" style={{ color: "#000000" }} />
       </div>
 
       {chatOpen && (
         <div className="chat-floating-drawer">
           <div className="chat-drawer-header">
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Lightbulb size={20} weight="bold" />
-              <span style={{ fontWeight: "bold", fontSize: "14px", fontFamily: "Space Grotesk" }}>Pocky - Your AI Coach</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Lightbulb size={22} weight="fill" />
+              <span style={{ fontWeight: "800", fontSize: "14px", fontFamily: "Space Grotesk" }}>Pocky - AI Coach</span>
             </div>
             <button 
               onClick={() => setChatOpen(false)} 
               style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}
             >
-              <X size={18} weight="bold" style={{ color: "#000000" }} />
+              <X size={20} weight="bold" style={{ color: "#000000" }} />
             </button>
           </div>
           <div className="chat-messages">
@@ -900,7 +1165,7 @@ export default function App() {
           <form onSubmit={handleSendChat} className="chat-input-bar">
             <input 
               type="text" 
-              placeholder="Ask Pocky anything..." 
+              placeholder="Ask Pocky anything about your budget..." 
               value={chatInput} 
               onChange={e => setChatInput(e.target.value)} 
               disabled={chatLoading} 
