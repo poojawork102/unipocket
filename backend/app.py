@@ -3,19 +3,23 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pymysql
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
 
+load_dotenv()
+# MySQL Connection Configuration
+
+db_config = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', 'pooja'),
+    'database': os.getenv('DB_NAME', 'up'),
+    'cursorclass': pymysql.cursors.DictCursor
+}
 app = Flask(__name__)
 # Enable CORS so your React frontend (port 3000) can talk to your Flask backend (port 5000)
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 
-# MySQL Connection Configuration
-db_config = {
-    'host': 'localhost',
-    'user': 'root',         # Replace with your MySQL username
-    'password': 'pooja', # Replace with your MySQL password
-    'database': 'up',
-    'cursorclass': pymysql.cursors.DictCursor
-}
+
 
 def get_db_connection():
     return pymysql.connect(**db_config)
@@ -483,4 +487,4 @@ def handle_categories():
         conn.close()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)
