@@ -22,7 +22,15 @@ CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 
 
 def get_db_connection():
-    return pymysql.connect(**db_config)
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        port=int(os.getenv('DB_PORT', 18018)),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        database=os.getenv('DB_NAME'),
+        ssl={'ssl': {}},  # <-- ADD THIS LINE FOR AIVEN SSL
+        cursorclass=pymysql.cursors.DictCursor
+    )
 
 def init_db():
     conn = get_db_connection()
