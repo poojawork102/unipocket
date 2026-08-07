@@ -15,11 +15,11 @@ db_config = {
     'database': os.getenv('DB_NAME', 'up'),
     'cursorclass': pymysql.cursors.DictCursor
 }
+
+
 app = Flask(__name__)
-# Enable CORS so your React frontend (port 3000) can talk to your Flask backend (port 5000)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
-
-
+# Allow requests from your Vercel frontend URL
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 def get_db_connection():
     return pymysql.connect(
