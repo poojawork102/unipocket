@@ -36,13 +36,23 @@ def init_db():
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Check and add contact_number column to users table
+            # 1. Execute full schema.sql first to ensure all base tables exist
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+            if os.path.exists(schema_path):
+                with open(schema_path, 'r') as f:
+                    sql_commands = f.read().split(';')
+                    for command in sql_commands:
+                        cmd = command.strip()
+                        if cmd:
+                            cursor.execute(cmd)
+
+            # 2. Migration: Check and add contact_number column to users table
             cursor.execute("SHOW COLUMNS FROM users LIKE 'contact_number'")
             has_contact = cursor.fetchone()
             if not has_contact:
                 cursor.execute("ALTER TABLE users ADD COLUMN contact_number VARCHAR(15) DEFAULT ''")
                 
-            # Create categories table if not exists
+            # 3. Migration: Create categories table if not exists
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS categories (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -53,7 +63,7 @@ def init_db():
                 )
             """)
         conn.commit()
-        print("Database migrations applied successfully!")
+        print("Database initialized and migrations applied successfully!")
     except Exception as e:
         print("Database schema migration error:", e)
     finally:
