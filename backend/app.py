@@ -110,7 +110,45 @@ def register():
     finally:
         if conn:
             conn.close()
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json or {}
+    email = data.get('email') or data.get('collegeEmail') or data.get('college_email')
+    password = data.get('password')
 
+    if not email or not password:
+        return jsonify({"error": "Missing email or password"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+            user = cursor.fetchone()
+
+        if user:
+            stored_hash = user['password']
+            if isinstance(stored_hash, bytes):
+                stored_hash = stored_hash.decode('utf-8')
+
+            if check_password_hash(stored_hash, password):
+                return jsonify({
+                    "message": "Login successful",
+                    "user": {
+                        "student_id": user['student_id'],
+                        "name": user['name'],
+                        "email": user['email'],
+                        "contact_number": user.get('contact_number', '')
+                    }
+                }), 200
+
+        return jsonify({"error": "Invalid email or password"}), 401
+    except Exception as e:
+        print(f"LOGIN ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 # --- TRANSACTIONS & EXPENSES ---
 
 @app.route('/api/expenses', methods=['GET'])
