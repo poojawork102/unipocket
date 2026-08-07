@@ -2,6 +2,7 @@ import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pymysql.cursors
+import ssl 
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
@@ -28,7 +29,7 @@ def get_db_connection():
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASSWORD'),
         database=os.getenv('DB_NAME'),
-        ssl={'check_hostname': False},
+        ssl={'ssl_mode': 'REQUIRED'},
         cursorclass=pymysql.cursors.DictCursor
     )
 
