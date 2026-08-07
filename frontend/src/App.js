@@ -9,7 +9,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import "./App.css";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:5000";
+const BACKEND_URL = "https://unipocket.onrender.com";
 
 export default function App() {
   // Global State & State Persistence (unipocket_user)
