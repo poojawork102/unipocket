@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    contact_number VARCHAR(15) DEFAULT ''
+    contact_number VARCHAR(20) DEFAULT ''
 );
 
 -- Categories Table
