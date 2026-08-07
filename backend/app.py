@@ -80,75 +80,36 @@ def health_check():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json
-    student_id = data.get('student_id')
-    email = data.get('email')
+    data = request.json or {}
+    student_id = data.get('student_id') or data.get('studentId')
+    email = data.get('email') or data.get('collegeEmail') or data.get('college_email')
     password = data.get('password')
-    name = data.get('name', 'Student')
-    contact_number = data.get('contact_number', '')
+    name = data.get('name') or data.get('fullName') or 'Student'
+    contact_number = str(data.get('contact_number') or data.get('contactNumber') or '')
 
     if not student_id or not email or not password:
-        return jsonify({"error": "Missing required fields"}), 400
+        return jsonify({"error": f"Missing required fields. Received: student_id={student_id}, email={email}"}), 400
 
     hashed_password = generate_password_hash(password)
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
-            # Check if user already exists
             cursor.execute("SELECT student_id FROM users WHERE student_id = %s OR email = %s", (student_id, email))
             if cursor.fetchone():
                 return jsonify({"error": "User with this Student ID or Email already exists"}), 400
 
-            # Insert new user
             sql = "INSERT INTO users (student_id, name, email, password, contact_number) VALUES (%s, %s, %s, %s, %s)"
             cursor.execute(sql, (student_id, name, email, hashed_password, contact_number))
         conn.commit()
-        return jsonify({
-            "message": "User registered successfully!", 
-            "user": {
-                "student_id": student_id, 
-                "name": name,
-                "email": email,
-                "contact_number": contact_number
-            }
-        }), 201
+        return jsonify({"message": "User registered successfully!"}), 201
     except Exception as e:
+        print(f"DATABASE INSERT ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
-
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.json
-    email = data.get('email')
-    password = data.get('password')
-
-    if not email or not password:
-        return jsonify({"error": "Missing email or password"}), 400
-
-    try:
-        conn = get_db_connection()
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-            user = cursor.fetchone()
-
-        if user and check_password_hash(user['password'], password):
-            return jsonify({
-                "message": "Login successful",
-                "user": {
-                    "student_id": user['student_id'],
-                    "name": user['name'],
-                    "email": user['email'],
-                    "contact_number": user.get('contact_number', '')
-                }
-            }), 200
-        else:
-            return jsonify({"error": "Invalid email or password"}), 401
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- TRANSACTIONS & EXPENSES ---
 
