@@ -16,6 +16,29 @@ UniPocket is a tailored personal finance management web application designed spe
 - ⚡ **Lightweight REST API:** Powered by Flask for smooth, asynchronous interactions between backend logic and UI.
 
 ---
+             ┌───────────────┐
+             │    Browser    │
+             └───────┬───────┘
+                     │
+                     ▼
+             ┌───────────────┐
+             │ Flask Backend │
+             └───────┬───────┘
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+        ┌──────────┐   ┌──────────┐
+        │ REST/API │   │ Templates│
+        └────┬─────┘   └──────────┘
+             │
+             ▼
+        ┌─────────────┐
+        │    MySQL    │
+        │             │
+        │ Schema      │
+        │ Procedures  │
+        │ Triggers    │
+        └─────────────┘
 
 ## 🛠️ Tech Stack
 
