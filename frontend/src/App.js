@@ -55,6 +55,83 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState("");
   const [alertMsg, setAlertMsg] = useState("");
 
+  // View Switcher & Toast Notifications State
+  const [viewPeriod, setViewPeriod] = useState("month"); // "all", "month", "week"
+  const [toasts, setToasts] = useState([]);
+
+  // Preset 1-Tap Quick Expenses Data
+  const QUICK_PRESETS = [
+    { title: "Chai", amount: 30, category: "Food", icon: "☕" },
+    { title: "Canteen", amount: 50, category: "Food", icon: "🍱" },
+    { title: "Snacks", amount: 100, category: "Food", icon: "🍿" },
+    { title: "Transport", amount: 200, category: "Travel", icon: "🛺" },
+    { title: "Zomato", amount: 150, category: "Food", icon: "🍕" },
+  ];
+
+  // Interactive Toast Manager with Auto-Dismiss & Undo
+  const showToast = (message, expenseId = null) => {
+    const toastId = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id: toastId, message, expenseId }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== toastId));
+    }, 6000);
+  };
+
+  const handleUndoExpense = async (toastId, expenseId) => {
+    if (!expenseId || !user?.student_id) return;
+    try {
+      await axios.delete(`${BACKEND_URL}/api/expense/${expenseId}?student_id=${user.student_id}`);
+      setToasts(prev => prev.filter(t => t.id !== toastId));
+      showToast("↩️ Expense entry reverted successfully!");
+      await fetchExpenses(user.student_id);
+      await fetchDashboardData(user.student_id);
+    } catch (err) {
+      console.error("Failed to undo expense:", err);
+      alert("Could not revert transaction.");
+    }
+  };
+
+  // 1-Tap Instant Quick Expense Handler
+  const handleQuickExpense = async (preset) => {
+    if (!user?.student_id) return;
+    const todayStr = new Date().toISOString().split('T')[0];
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/expense`, {
+        student_id: user.student_id,
+        title: preset.title,
+        amount: preset.amount,
+        category: preset.category,
+        date: todayStr
+      });
+      const createdId = res.data?.id;
+      showToast(`Logged +₹${preset.amount} for ${preset.title}!`, createdId);
+      await fetchExpenses(user.student_id);
+      await fetchDashboardData(user.student_id);
+    } catch (err) {
+      alert("Failed to log quick expense.");
+    }
+  };
+
+  // Smart Category Auto-Detection based on keyword matching
+  const autoDetectCategory = (titleText) => {
+    const lower = titleText.toLowerCase();
+    if (/chai|tea|coffee|canteen|zomato|swiggy|lunch|dinner|breakfast|food|maggi|maggie|snack|pizza|burger/.test(lower)) return "Food";
+    if (/uber|ola|auto|cab|bus|metro|train|travel|petrol|bike|rickshaw/.test(lower)) return "Travel";
+    if (/book|notes|stationary|xerox|print|copy|pen|pen drive|exam/.test(lower)) return "Books";
+    if (/movie|cinema|netflix|spotify|game|party|club|event|recharge/.test(lower)) return "Entertainment";
+    return null;
+  };
+
+  const handleTitleChange = (e) => {
+    const newTitle = e.target.value;
+    const matchedCategory = autoDetectCategory(newTitle);
+    setExpenseForm(prev => ({
+      ...prev,
+      title: newTitle,
+      category: matchedCategory && categories.includes(matchedCategory) ? matchedCategory : prev.category
+    }));
+  };
+
   // Floating AI Coach Drawer State
   const [chatOpen, setChatOpen] = useState(false);
   const [chatLog, setChatLog] = useState([
@@ -201,21 +278,66 @@ export default function App() {
     if (user?.student_id) {
       fetchDashboardData(user.student_id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedMonth]);
 
   // Auth Operations
-  const handleAuthSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setErrorMsg("");
-    const endpoint = authMode === "login" ? "/api/login" : "/api/register";
+    
+    // Basic validation
+    if (!authForm.email || !authForm.password) {
+      showToast("Please enter both email and password.", "error");
+      return;
+    }
+
     try {
-      const res = await axios.post(`${BACKEND_URL}${endpoint}`, authForm);
-      if (res.data.user) {
-        localStorage.setItem("unipocket_user", JSON.stringify(res.data.user));
-        setUser(res.data.user);
+      const response = await axios.post(`${BACKEND_URL}/api/login`, {
+        email: authForm.email,
+        password: authForm.password
+      });
+
+      if (response.status === 200 && response.data.user) {
+        const userData = response.data.user;
+
+        // 1. Save to LocalStorage so refresh maintains state
+        localStorage.setItem("unipocket_user", JSON.stringify(userData));
+        localStorage.setItem("up_user", JSON.stringify(userData));
+
+        // 2. Set React State immediately to trigger re-render to Dashboard
+        setUser(userData);
+
+        showToast("Logged in successfully! Welcome to UniPocket.", "success");
+      } else {
+        showToast("Authentication failed. Please try again.", "error");
       }
-    } catch (err) {
-      setErrorMsg(err.response?.data?.error || "Authentication error. Verify database configuration.");
+    } catch (error) {
+      console.error("Login Error Details:", error);
+      const msg = error.response?.data?.error || "Invalid email or password";
+      setErrorMsg(msg);
+      showToast(msg, "error");
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!authForm.email || !authForm.password || !authForm.student_id) {
+      showToast("Please fill in all required registration fields.", "error");
+      return;
+    }
+
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/register`, authForm);
+      if (response.status === 201 || response.status === 200) {
+        setErrorMsg("");
+        showToast("Registration successful! Please log in.", "success");
+        setAuthMode("login");
+      }
+    } catch (error) {
+      console.error("Registration Error Details:", error);
+      const msg = error.response?.data?.error || "Registration failed.";
+      setErrorMsg(msg);
+      showToast(msg, "error");
     }
   };
 
@@ -256,13 +378,15 @@ export default function App() {
     e.preventDefault();
     if (!expenseForm.title || !expenseForm.amount) return;
     try {
-      await axios.post(`${BACKEND_URL}/api/expense`, {
+      const res = await axios.post(`${BACKEND_URL}/api/expense`, {
         student_id: user.student_id,
         title: expenseForm.title,
         amount: parseFloat(expenseForm.amount),
         category: expenseForm.category,
         date: expenseForm.date
       });
+      const createdId = res.data?.id;
+      showToast(`Logged ₹${parseFloat(expenseForm.amount).toFixed(0)} for ${expenseForm.title}!`, createdId);
       setExpenseForm({ title: "", amount: "", category: categories[0] || "Food", date: new Date().toISOString().split('T')[0] });
       // Trigger instant state refresh across Dashboard, Calendar, Ledger Feed, and Analytics
       await fetchExpenses(user.student_id);
@@ -390,12 +514,68 @@ export default function App() {
     }
   };
 
-  // Month-wise Filtering & Financial KPI Calculations
-  const filteredExpenses = expenses.filter(item => item.date && item.date.startsWith(selectedMonth));
-  const monthlyTotalSpent = filteredExpenses.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+  // Period View Switcher & Dynamic KPI Calculations
+  const getFilteredExpensesByView = () => {
+    if (viewPeriod === "all") return expenses;
+    if (viewPeriod === "week") {
+      const now = new Date();
+      const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return expenses.filter(item => item.date && new Date(item.date) >= oneWeekAgo);
+    }
+    // Default "month"
+    return expenses.filter(item => item.date && item.date.startsWith(selectedMonth));
+  };
+
+  const filteredExpenses = getFilteredExpensesByView();
+  const monthlyTotalSpent = expenses
+    .filter(item => item.date && item.date.startsWith(selectedMonth))
+    .reduce((sum, item) => sum + parseFloat(item.amount), 0);
+
+  const activePeriodSpent = filteredExpenses.reduce((sum, item) => sum + parseFloat(item.amount), 0);
   
   const totalBudgetCap = budgets.reduce((sum, item) => sum + parseFloat(item.amount_limit), 0);
   const remainingBudget = Math.max(0, totalBudgetCap - monthlyTotalSpent);
+
+  // Plain-English Financial Health Status Calculation
+  const getFinancialHealthStatus = () => {
+    const today = new Date();
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const currentDay = today.getDate();
+    const daysLeft = Math.max(1, daysInMonth - currentDay + 1);
+
+    if (monthlyTotalSpent > totalBudgetCap && totalBudgetCap > 0) {
+      return {
+        text: `🔴 Budget exceeded by ₹${(monthlyTotalSpent - totalBudgetCap).toFixed(0)}! Hold back on extra spends for the rest of the month.`,
+        subtext: `${daysLeft} days remaining in current billing cycle • Total Limit: ₹${totalBudgetCap.toFixed(0)}`,
+        mode: "danger"
+      };
+    }
+
+    if (totalBudgetCap === 0) {
+      return {
+        text: "🌱 Set category budget caps to enable instant plain-English financial health status!",
+        subtext: "Configure your category limits under the Budgets & Savings tab.",
+        mode: "safe"
+      };
+    }
+
+    const safeDaily = remainingBudget / daysLeft;
+    if (safeDaily < 50) {
+      return {
+        text: `🟡 Tight Budget Alert! Safe to spend ₹${safeDaily.toFixed(0)}/day for the next ${daysLeft} days.`,
+        subtext: `₹${remainingBudget.toFixed(0)} budget left out of ₹${totalBudgetCap.toFixed(0)} configured caps`,
+        mode: "warning"
+      };
+    }
+
+    return {
+      text: `🟢 Safe to spend ₹${safeDaily.toFixed(0)} today!`,
+      subtext: `₹${remainingBudget.toFixed(0)} budget remaining across ${daysLeft} days left in this month`,
+      mode: "safe"
+    };
+  };
+
+  const financialHealth = getFinancialHealthStatus();
 
   const totalSaved = savings.reduce((sum, item) => sum + parseFloat(item.current_saved), 0);
   const totalSavingsTarget = savings.reduce((sum, item) => sum + parseFloat(item.target_amount), 0);
@@ -461,30 +641,30 @@ export default function App() {
           
           {errorMsg && <div style={{ background: "var(--destructive)", color: "#fff", padding: "12px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px", marginBottom: "18px" }}>{errorMsg}</div>}
 
-          <form onSubmit={handleAuthSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <form onSubmit={authMode === "login" ? handleLogin : handleRegister} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             {authMode === "signup" && (
               <>
                 <div>
-                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Full Name</label>
-                  <input type="text" className="nb-input" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} />
+                  <label htmlFor="auth-name" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Full Name</label>
+                  <input id="auth-name" name="name" type="text" className="nb-input" autoComplete="name" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} />
                 </div>
                 <div>
-                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Student ID</label>
-                  <input type="text" className="nb-input" placeholder="e.g. STU123" required value={authForm.student_id} onChange={e => setAuthForm({...authForm, student_id: e.target.value})} />
+                  <label htmlFor="auth-student-id" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Student ID</label>
+                  <input id="auth-student-id" name="student_id" type="text" className="nb-input" placeholder="e.g. STU123" autoComplete="username" required value={authForm.student_id} onChange={e => setAuthForm({...authForm, student_id: e.target.value})} />
                 </div>
                 <div>
-                  <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Contact Number</label>
-                  <input type="text" className="nb-input" placeholder="e.g. +9199887766" value={authForm.contact_number} onChange={e => setAuthForm({...authForm, contact_number: e.target.value})} />
+                  <label htmlFor="auth-contact-number" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Contact Number</label>
+                  <input id="auth-contact-number" name="contact_number" type="text" className="nb-input" placeholder="e.g. +9199887766" autoComplete="tel" value={authForm.contact_number} onChange={e => setAuthForm({...authForm, contact_number: e.target.value})} />
                 </div>
               </>
             )}
             <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
-              <input type="email" className="nb-input" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} />
+              <label htmlFor="auth-email" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
+              <input id="auth-email" name="email" type="email" className="nb-input" autoComplete="email" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} />
             </div>
             <div>
-              <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Password</label>
-              <input type="password" className="nb-input" required value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} />
+              <label htmlFor="auth-password" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Password</label>
+              <input id="auth-password" name="password" type="password" className="nb-input" autoComplete={authMode === "login" ? "current-password" : "new-password"} required value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} />
             </div>
 
             <button type="submit" className="nb-btn" style={{ padding: "12px", fontSize: "15px", marginTop: "10px" }}>
@@ -672,6 +852,14 @@ export default function App() {
       {/* TAB 1: DASHBOARD (OVERVIEW) */}
       {activeTab === "dashboard" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          {/* PLAIN-ENGLISH FINANCIAL HEALTH STATUS BANNER */}
+          <div className={`financial-health-banner ${financialHealth.mode}`}>
+            <div className="financial-health-info">
+              <div className="financial-health-text">{financialHealth.text}</div>
+            </div>
+            <div className="financial-health-subtext">{financialHealth.subtext}</div>
+          </div>
+
           {/* AI INSIGHT BANNER */}
           <div className={`ai-banner ${isBreachedState ? "breached" : ""}`}>
             <div className="ai-banner-content">
@@ -690,18 +878,44 @@ export default function App() {
             </button>
           </div>
 
-          {/* TOP KPI ROW */}
+          {/* 1-TAP QUICK EXPENSE PRESET CHIPS */}
+          <div className="nb-card" style={{ padding: "16px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span className="quick-preset-label">⚡ 1-TAP QUICK EXPENSE:</span>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>Log preset spends in one click</span>
+              </div>
+              <div className="quick-presets-container" style={{ marginTop: 0 }}>
+                {QUICK_PRESETS.map((p, idx) => (
+                  <button key={idx} className="quick-preset-btn" onClick={() => handleQuickExpense(p)}>
+                    <span>{p.icon}</span> +₹{p.amount} {p.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* SIMPLIFIED VIEW SWITCHER & TOP KPI ROW */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+            <h3 style={{ margin: 0 }}>FINANCIAL OVERVIEW MATRIX</h3>
+            <div className="view-switcher-bar">
+              <button className={`view-switcher-btn ${viewPeriod === "all" ? "active" : ""}`} onClick={() => setViewPeriod("all")}>All-Time</button>
+              <button className={`view-switcher-btn ${viewPeriod === "month" ? "active" : ""}`} onClick={() => setViewPeriod("month")}>This Month</button>
+              <button className={`view-switcher-btn ${viewPeriod === "week" ? "active" : ""}`} onClick={() => setViewPeriod("week")}>This Week</button>
+            </div>
+          </div>
+
           <div className="kpi-grid">
             <div className="kpi-card">
               <div className="kpi-card-header">
-                <span className="kpi-title">Monthly Outflow</span>
+                <span className="kpi-title">Outflow ({viewPeriod === "all" ? "All-Time" : viewPeriod === "week" ? "7 Days" : "Monthly"})</span>
                 <div className="kpi-icon" style={{ background: "rgba(239, 68, 68, 0.15)", color: "var(--destructive)" }}>
                   <ArrowUpRight size={22} weight="bold" />
                 </div>
               </div>
               <div>
-                <h2 className="kpi-value" style={{ color: "var(--destructive)" }}>₹{monthlyTotalSpent.toFixed(2)}</h2>
-                <span style={{ fontSize: "12px", opacity: 0.7 }}>Period: {selectedMonth}</span>
+                <h2 className="kpi-value" style={{ color: "var(--destructive)" }}>₹{activePeriodSpent.toFixed(2)}</h2>
+                <span style={{ fontSize: "12px", opacity: 0.7 }}>{filteredExpenses.length} transactions recorded</span>
               </div>
             </div>
 
@@ -793,12 +1007,27 @@ export default function App() {
                 <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Transaction Title</label>
                 <input 
                   type="text" 
-                  placeholder="e.g. Textbook purchase, Campus lunch" 
+                  placeholder="e.g. Chai, Zomato lunch, Uber ride, Book print" 
                   className="nb-input" 
                   required 
                   value={expenseForm.title} 
-                  onChange={e => setExpenseForm({...expenseForm, title: e.target.value})} 
+                  onChange={handleTitleChange} 
                 />
+                <span style={{ fontSize: "11px", opacity: 0.7, marginTop: "2px", display: "block" }}>
+                  💡 Smart Auto-Detection enabled! Category adjusts as you type.
+                </span>
+              </div>
+
+              {/* 1-Tap Quick Expense Shortcuts */}
+              <div>
+                <span className="quick-preset-label">1-Tap Shortcuts:</span>
+                <div className="quick-presets-container">
+                  {QUICK_PRESETS.map((p, idx) => (
+                    <button type="button" key={idx} className="quick-preset-btn" onClick={() => handleQuickExpense(p)}>
+                      <span>{p.icon}</span> +₹{p.amount} {p.title}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div style={{ display: "flex", gap: "12px" }}>
@@ -1058,10 +1287,10 @@ export default function App() {
             
             {chartData.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px", border: "2px dashed var(--border)", borderRadius: "8px" }}>
-                <p style={{ color: "var(--fg)", opacity: 0.7, fontSize: "14px" }}>No transactions mapped for this period to render matrix.</p>
+                <p style={{ color: "var(--fg)", opacity: 0.7, fontSize: "14px" }}>No transactions mapped for this period ({viewPeriod === "all" ? "All-Time" : viewPeriod === "week" ? "This Week" : selectedMonth}) to render matrix.</p>
               </div>
             ) : (
-              <div style={{ width: "100%", height: "260px" }}>
+              <div style={{ width: "100%", height: "300px", minHeight: "300px" }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                     <XAxis dataKey="category" stroke="var(--fg)" tick={{ fontSize: 12, fontWeight: "bold" }} />
@@ -1070,7 +1299,7 @@ export default function App() {
                       cursor={{ fill: 'rgba(255,255,255,0.05)' }} 
                       contentStyle={{ background: 'var(--card)', border: '2px solid var(--border)', borderRadius: '8px', fontFamily: 'Space Grotesk' }} 
                     />
-                    <Bar dataKey="amount" fill="#ccff00" stroke="var(--border)" strokeWidth={2} radius={[6, 6, 0, 0]}>
+                    <Bar dataKey="amount" fill="#ccff00" stroke="var(--border)" strokeWidth={2} radius={[6, 6, 0, 0]} isAnimationActive={false}>
                       {chartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                       ))}
@@ -1172,6 +1401,25 @@ export default function App() {
             />
             <button type="submit" disabled={chatLoading}>Ask</button>
           </form>
+        </div>
+      )}
+
+      {/* INTERACTIVE TOAST NOTIFICATIONS STACK WITH INLINE UNDO BUTTON */}
+      {toasts.length > 0 && (
+        <div className="toast-stack">
+          {toasts.map(toast => (
+            <div key={toast.id} className="toast-item">
+              <div className="toast-message">
+                <span>⚡</span>
+                <span>{toast.message}</span>
+              </div>
+              {toast.expenseId && (
+                <button className="toast-undo-btn" onClick={() => handleUndoExpense(toast.id, toast.expenseId)}>
+                  UNDO
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

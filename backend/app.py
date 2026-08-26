@@ -19,23 +19,51 @@ db_config = {
 
 
 app = Flask(__name__)
-# Allow requests from your Vercel frontend URL
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
+
+# Global preflight OPTIONS request interceptor
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        return response
+
+# Enforce active CORS headers across all response statuses (including errors)
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
 
 def get_db_connection():
+    ssl_config = None
+    if os.getenv('DB_SSL', 'true').lower() == 'true':
+        ssl_config = {'ssl_mode': 'REQUIRED'}
     return pymysql.connect(
-        host=os.getenv('DB_HOST'),
+        host=os.getenv('DB_HOST', 'localhost'),
         port=int(os.getenv('DB_PORT', 18018)),
-        user=os.getenv('DB_USER'),
-        password=os.getenv('DB_PASSWORD'),
-        database=os.getenv('DB_NAME'),
-        ssl={'ssl_mode': 'REQUIRED'},
+        user=os.getenv('DB_USER', 'root'),
+        password=os.getenv('DB_PASSWORD', 'pooja'),
+        database=os.getenv('DB_NAME', 'up'),
+        connect_timeout=5,
+        ssl=ssl_config,
         cursorclass=pymysql.cursors.DictCursor
     )
 
+def get_user_field(user_obj, field_name, tuple_index, default=''):
+    if not user_obj:
+        return default
+    if isinstance(user_obj, dict):
+        return user_obj.get(field_name, default)
+    elif isinstance(user_obj, (list, tuple)):
+        return user_obj[tuple_index] if len(user_obj) > tuple_index else default
+    return default
+
 def init_db():
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             # 1. Execute full schema.sql first to ensure all base tables exist
             schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
@@ -68,7 +96,8 @@ def init_db():
     except Exception as e:
         print("Database schema migration error:", e)
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 init_db()
 
@@ -110,6 +139,7 @@ def register():
     finally:
         if conn:
             conn.close()
+
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json or {}
@@ -127,7 +157,7 @@ def login():
             user = cursor.fetchone()
 
         if user:
-            stored_hash = user['password']
+            stored_hash = get_user_field(user, 'password', 3)
             if isinstance(stored_hash, bytes):
                 stored_hash = stored_hash.decode('utf-8')
 
@@ -135,10 +165,10 @@ def login():
                 return jsonify({
                     "message": "Login successful",
                     "user": {
-                        "student_id": user['student_id'],
-                        "name": user['name'],
-                        "email": user['email'],
-                        "contact_number": user.get('contact_number', '')
+                        "student_id": get_user_field(user, 'student_id', 0),
+                        "name": get_user_field(user, 'name', 1),
+                        "email": get_user_field(user, 'email', 2),
+                        "contact_number": get_user_field(user, 'contact_number', 4, '')
                     }
                 }), 200
 
@@ -149,6 +179,7 @@ def login():
     finally:
         if conn:
             conn.close()
+
 # --- TRANSACTIONS & EXPENSES ---
 
 @app.route('/api/expenses', methods=['GET'])
@@ -157,10 +188,11 @@ def get_expenses():
     if not student_id:
         return jsonify({"error": "Unauthorized. Student ID required."}), 401
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM expenses WHERE student_id = %s ORDER BY date DESC", (student_id,))
+            cursor.execute("SELECT * FROM expenses WHERE student_id = %s ORDER BY date DESC, id DESC", (student_id,))
             expenses = cursor.fetchall()
             for exp in expenses:
                 if exp.get('date'):
@@ -169,11 +201,12 @@ def get_expenses():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 @app.route('/api/expense', methods=['POST'])
 def add_expense():
-    data = request.json
+    data = request.json or {}
     student_id = data.get('student_id')
     title = data.get('title')
     amount = data.get('amount')
@@ -183,17 +216,48 @@ def add_expense():
     if not all([student_id, title, amount, category, date]):
         return jsonify({"error": "Missing transaction parameters"}), 400
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
             sql = "INSERT INTO expenses (student_id, title, amount, category, date) VALUES (%s, %s, %s, %s, %s)"
             cursor.execute(sql, (student_id, title, amount, category, date))
+            expense_id = cursor.lastrowid
         conn.commit()
-        return jsonify({"message": "Expense logged successfully!"}), 201
+        return jsonify({"message": "Expense logged successfully!", "id": expense_id}), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
+@app.route('/api/expense/<int:expense_id>', methods=['DELETE', 'OPTIONS'])
+def delete_expense(expense_id):
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+
+    student_id = request.args.get('student_id') or (request.json and request.json.get('student_id'))
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            if student_id:
+                sql = "DELETE FROM expenses WHERE id = %s AND student_id = %s"
+                cursor.execute(sql, (expense_id, student_id))
+            else:
+                sql = "DELETE FROM expenses WHERE id = %s"
+                cursor.execute(sql, (expense_id,))
+            
+            if cursor.rowcount == 0:
+                return jsonify({"error": "Expense record not found or unauthorized"}), 404
+        conn.commit()
+        return jsonify({"message": "Expense deleted successfully!", "id": expense_id}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
 # --- BUDGETS & SAVINGS ENDPOINTS ---
 

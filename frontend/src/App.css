@@ -114,6 +114,7 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 26px;
   background: linear-gradient(135deg, var(--primary), var(--accent));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -794,4 +795,191 @@ h1, h2, h3, h4, h5, h6 {
 @keyframes pulse {
   from { filter: brightness(1); }
   to { filter: brightness(1.2); }
+}
+
+/* Quick 1-Tap Expense Preset Buttons */
+.quick-presets-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.quick-preset-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+  margin-right: 4px;
+}
+
+.quick-preset-btn {
+  background: var(--muted);
+  color: var(--fg);
+  border: 2px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  box-shadow: 2px 2px 0px var(--shadow);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.quick-preset-btn:hover {
+  background: var(--primary);
+  color: #000000;
+  border-color: #000000;
+  transform: translateY(-2px);
+  box-shadow: 3px 3px 0px var(--shadow);
+}
+
+.quick-preset-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px var(--shadow);
+}
+
+/* Plain-English Financial Health Status Banner */
+.financial-health-banner {
+  background: var(--card);
+  border: var(--card-border);
+  box-shadow: 4px 4px 0px var(--shadow);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  transition: all 0.25s ease;
+}
+
+.financial-health-banner.safe {
+  border-left: 8px solid var(--primary);
+}
+
+.financial-health-banner.warning {
+  border-left: 8px solid var(--orange);
+}
+
+.financial-health-banner.danger {
+  border-left: 8px solid var(--destructive);
+}
+
+.financial-health-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.financial-health-text {
+  font-size: 15px;
+  font-weight: 800;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.financial-health-subtext {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+/* Simplified View Switcher Bar */
+.view-switcher-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--muted);
+  padding: 4px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  width: fit-content;
+}
+
+.view-switcher-btn {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-switcher-btn.active {
+  background: var(--primary);
+  color: #000000;
+  box-shadow: 2px 2px 0px var(--shadow);
+  border: 1px solid #000000;
+}
+
+/* Interactive Toast Stack with UNDO Button */
+.toast-stack {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.toast-item {
+  pointer-events: auto;
+  background: var(--card);
+  color: var(--fg);
+  border: 2px solid var(--border);
+  box-shadow: 4px 4px 0px var(--shadow);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  animation: slide-up 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.toast-message {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toast-undo-btn {
+  background: var(--primary);
+  color: #000000;
+  border: 2px solid #000000;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  box-shadow: 2px 2px 0px #000000;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.toast-undo-btn:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.toast-undo-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 0px 0px 0px #000000;
 }
