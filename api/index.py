@@ -6,6 +6,11 @@ from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
 from werkzeug.security import generate_password_hash, check_password_hash
+import smtplib
+import random as _random
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timedelta
 
 # Simple in-memory rate limiter
 _rate_store = defaultdict(list)
@@ -108,6 +113,15 @@ def init_db():
                     current_saved DECIMAL(10, 2) DEFAULT 0.00
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS otp_codes (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(100) NOT NULL,
+                    otp VARCHAR(6) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE
+                )
+            """)
             # Migration: add contact_number if missing
             cur.execute("""
                 SELECT column_name FROM information_schema.columns
@@ -153,6 +167,9 @@ def register():
 
     if not student_id or not email or not password:
         return jsonify({"error": "Missing required fields"}), 400
+
+    if not email.lower().endswith('@mitwpu.edu.in'):
+        return jsonify({"error": "Only @mitwpu.edu.in email addresses are allowed"}), 400
 
     hashed_password = generate_password_hash(password)
 
@@ -216,6 +233,174 @@ def login():
     finally:
         if conn:
             conn.close()
+
+# --- FORGOT PASSWORD (Email OTP) ---
+
+def send_otp_email(to_email, otp_code, user_name):
+    smtp_email = os.getenv('SMTP_EMAIL')
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    if not smtp_email or not smtp_password:
+        return False
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = f'UniPocket — Your Password Reset Code: {otp_code}'
+    msg['From'] = f'UniPocket <{smtp_email}>'
+    msg['To'] = to_email
+
+    html = f"""
+    <div style="max-width:480px;margin:0 auto;font-family:'Segoe UI',Arial,sans-serif;background:#1a1a2e;border-radius:12px;overflow:hidden;border:2px solid #333;">
+      <div style="background:#ccff00;padding:20px 24px;text-align:center;">
+        <h1 style="margin:0;color:#000;font-size:24px;font-weight:900;">UniPocket</h1>
+        <p style="margin:4px 0 0;color:#333;font-size:11px;font-weight:700;letter-spacing:1.5px;">STUDENT FINANCIAL SUITE</p>
+      </div>
+      <div style="padding:32px 24px;color:#e0e0e0;">
+        <h2 style="margin:0 0 8px;color:#fff;font-size:20px;">Password Reset Request</h2>
+        <p style="margin:0 0 4px;color:#ccc;font-size:14px;">Hi {user_name},</p>
+        <p style="margin:0 0 24px;color:#999;font-size:14px;line-height:1.6;">
+          We received a request to reset your UniPocket password. Enter the verification code below in the app:
+        </p>
+        <div style="background:#2a2a3e;border:2px solid #ccff00;border-radius:10px;padding:24px;text-align:center;margin:0 0 24px;">
+          <span style="font-size:40px;font-weight:900;letter-spacing:14px;color:#ccff00;font-family:monospace;">{otp_code}</span>
+        </div>
+        <p style="margin:0 0 8px;color:#ccc;font-size:13px;">This code expires in <strong style="color:#fff;">5 minutes</strong>.</p>
+        <p style="margin:0 0 0;color:#666;font-size:12px;">If you didn't request this reset, you can safely ignore this email. Your password will remain unchanged.</p>
+      </div>
+      <div style="background:#111;padding:14px 24px;text-align:center;border-top:1px solid #333;">
+        <p style="margin:0;color:#555;font-size:11px;">&copy; {datetime.now().year} UniPocket &mdash; All rights reserved.</p>
+      </div>
+    </div>
+    """
+
+    msg.attach(MIMEText(html, 'html'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(smtp_email, smtp_password.replace(' ', ''))
+        server.sendmail(smtp_email, to_email, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"SMTP error: {e}")
+        return False
+
+
+@app.route('/api/forgot-password', methods=['POST'])
+def forgot_password():
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if is_rate_limited(f"forgot:{client_ip}"):
+        return jsonify({"error": "Too many requests. Please wait before trying again."}), 429
+
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT student_id, name, email FROM users WHERE LOWER(email) = %s", (email,))
+            user = cur.fetchone()
+            if not user:
+                return jsonify({"error": "No account found with this email address"}), 404
+
+            otp_code = str(_random.randint(100000, 999999))
+            expires_at = datetime.now() + timedelta(minutes=5)
+
+            cur.execute("DELETE FROM otp_codes WHERE email = %s", (email,))
+            cur.execute(
+                "INSERT INTO otp_codes (email, otp, expires_at) VALUES (%s, %s, %s)",
+                (email, otp_code, expires_at))
+        conn.commit()
+
+        sent = send_otp_email(user['email'], otp_code, user['name'])
+        if not sent:
+            return jsonify({"error": "Email service unavailable. Please contact support."}), 503
+
+        return jsonify({"message": "Verification code sent to your email!", "email": email}), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route('/api/verify-otp', methods=['POST'])
+def verify_otp():
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    otp = (data.get('otp') or '').strip()
+
+    if not email or not otp:
+        return jsonify({"error": "Email and OTP are required"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, otp, expires_at, used FROM otp_codes WHERE email = %s ORDER BY id DESC LIMIT 1",
+                (email,))
+            record = cur.fetchone()
+
+            if not record:
+                return jsonify({"error": "No verification code found. Please request a new one."}), 404
+            if record['used']:
+                return jsonify({"error": "This code has already been used. Request a new one."}), 400
+            if datetime.now() > record['expires_at']:
+                return jsonify({"error": "Verification code has expired. Please request a new one."}), 400
+            if record['otp'] != otp:
+                return jsonify({"error": "Invalid verification code. Please check and try again."}), 400
+
+            cur.execute("UPDATE otp_codes SET used = TRUE WHERE id = %s", (record['id'],))
+        conn.commit()
+        return jsonify({"message": "Code verified successfully!", "verified": True}), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route('/api/reset-password', methods=['POST'])
+def reset_password():
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    new_password = data.get('new_password', '')
+
+    if not email or not new_password:
+        return jsonify({"error": "Email and new password are required"}), 400
+    if len(new_password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM otp_codes WHERE email = %s AND used = TRUE ORDER BY id DESC LIMIT 1",
+                (email,))
+            if not cur.fetchone():
+                return jsonify({"error": "Please verify your email first"}), 403
+
+            hashed = generate_password_hash(new_password)
+            cur.execute("UPDATE users SET password = %s WHERE LOWER(email) = %s", (hashed, email))
+            if cur.rowcount == 0:
+                return jsonify({"error": "User not found"}), 404
+
+            cur.execute("DELETE FROM otp_codes WHERE email = %s", (email,))
+        conn.commit()
+        return jsonify({"message": "Password reset successful! You can now log in with your new password."}), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
 
 # --- EXPENSES ---
 

@@ -67,6 +67,12 @@ export default function App() {
   // Legal Modal State (privacy | terms | null)
   const [legalModal, setLegalModal] = useState(null);
 
+  // Forgot Password Flow State
+  const [forgotStep, setForgotStep] = useState(null); // null | "email" | "otp" | "reset" | "done"
+  const [forgotForm, setForgotForm] = useState({ email: "", otp: "", newPassword: "", confirmPassword: "" });
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMsg, setForgotMsg] = useState("");
+
   // Preset 1-Tap Quick Expenses Data
   const QUICK_PRESETS = [
     { title: "Chai", amount: 30, category: "Food", icon: "☕" },
@@ -289,6 +295,63 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedMonth]);
 
+  // Forgot Password Handlers
+  const handleForgotSendOTP = async (e) => {
+    e.preventDefault();
+    if (!forgotForm.email) { setForgotMsg("Please enter your email"); return; }
+    setForgotLoading(true);
+    setForgotMsg("");
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/forgot-password`, { email: forgotForm.email });
+      setForgotMsg(res.data.message);
+      setForgotStep("otp");
+    } catch (err) {
+      setForgotMsg(err.response?.data?.error || "Failed to send verification code");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleForgotVerifyOTP = async (e) => {
+    e.preventDefault();
+    if (!forgotForm.otp || forgotForm.otp.length !== 6) { setForgotMsg("Enter the 6-digit code"); return; }
+    setForgotLoading(true);
+    setForgotMsg("");
+    try {
+      await axios.post(`${BACKEND_URL}/api/verify-otp`, { email: forgotForm.email, otp: forgotForm.otp });
+      setForgotStep("reset");
+      setForgotMsg("");
+    } catch (err) {
+      setForgotMsg(err.response?.data?.error || "Verification failed");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleForgotResetPassword = async (e) => {
+    e.preventDefault();
+    if (forgotForm.newPassword.length < 6) { setForgotMsg("Password must be at least 6 characters"); return; }
+    if (forgotForm.newPassword !== forgotForm.confirmPassword) { setForgotMsg("Passwords do not match"); return; }
+    setForgotLoading(true);
+    setForgotMsg("");
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/reset-password`, { email: forgotForm.email, new_password: forgotForm.newPassword });
+      setForgotMsg(res.data.message);
+      setForgotStep("done");
+    } catch (err) {
+      setForgotMsg(err.response?.data?.error || "Password reset failed");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const resetForgotFlow = () => {
+    setForgotStep(null);
+    setForgotForm({ email: "", otp: "", newPassword: "", confirmPassword: "" });
+    setForgotMsg("");
+    setForgotLoading(false);
+  };
+
   // Auth Operations
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -335,6 +398,10 @@ export default function App() {
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authForm.email)) {
       showToast("Please enter a valid email address.", "error");
+      return;
+    }
+    if (!authForm.email.toLowerCase().endsWith('@mitwpu.edu.in')) {
+      showToast("Only @mitwpu.edu.in email addresses are allowed.", "error");
       return;
     }
     if (authForm.password.length < 6) {
@@ -680,7 +747,7 @@ export default function App() {
             )}
             <div>
               <label htmlFor="auth-email" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
-              <input id="auth-email" name="email" type="email" className="nb-input" autoComplete="email" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} />
+              <input id="auth-email" name="email" type="email" className="nb-input" placeholder="name@mitwpu.edu.in" autoComplete="email" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} />
             </div>
             <div>
               <label htmlFor="auth-password" style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Password</label>
@@ -690,6 +757,14 @@ export default function App() {
             <button type="submit" className="nb-btn" style={{ padding: "12px", fontSize: "15px", marginTop: "10px" }}>
               {authMode === "login" ? <><SignIn size={18} weight="bold"/> Enter Platform</> : <><UserPlus size={18} weight="bold"/> Create Profile</>}
             </button>
+
+            {authMode === "login" && (
+              <div style={{ textAlign: "right", marginTop: "8px" }}>
+                <span style={{ cursor: "pointer", fontWeight: "600", fontSize: "12px", color: "var(--accent)" }} onClick={() => { setForgotStep("email"); setForgotMsg(""); }}>
+                  Forgot Password?
+                </span>
+              </div>
+            )}
           </form>
 
           <div style={{ textAlign: "center", marginTop: "24px", paddingTop: "16px", borderTop: "2px dashed var(--border)" }}>
@@ -706,6 +781,115 @@ export default function App() {
             <span style={{ cursor: "pointer", textDecoration: "underline", color: "var(--accent)" }} onClick={() => setLegalModal("terms")}>Terms of Service</span>
           </div>
         </div>
+
+        {/* Forgot Password Overlay */}
+        {forgotStep && (
+          <div className="legal-overlay" onClick={resetForgotFlow}>
+            <div className="legal-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: "420px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                <h2 style={{ margin: 0, fontSize: "20px" }}>
+                  {forgotStep === "done" ? "Password Reset" : "Reset Password"}
+                </h2>
+                <button onClick={resetForgotFlow} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--fg)" }}>✕</button>
+              </div>
+
+              {/* Progress Steps */}
+              {forgotStep !== "done" && (
+                <div style={{ display: "flex", gap: "4px", marginBottom: "24px" }}>
+                  {["email", "otp", "reset"].map((step, i) => (
+                    <div key={step} style={{
+                      flex: 1, height: "4px", borderRadius: "2px",
+                      background: ["email", "otp", "reset"].indexOf(forgotStep) >= i ? "var(--primary)" : "var(--border)"
+                    }} />
+                  ))}
+                </div>
+              )}
+
+              {forgotMsg && (
+                <div style={{
+                  padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", marginBottom: "16px",
+                  background: forgotStep === "done" || forgotMsg.includes("sent") ? "rgba(204,255,0,0.15)" : "rgba(239,68,68,0.15)",
+                  color: forgotStep === "done" || forgotMsg.includes("sent") ? "var(--primary)" : "var(--destructive)",
+                  border: `1px solid ${forgotStep === "done" || forgotMsg.includes("sent") ? "var(--primary)" : "var(--destructive)"}`
+                }}>{forgotMsg}</div>
+              )}
+
+              {/* Step 1: Enter Email */}
+              {forgotStep === "email" && (
+                <form onSubmit={handleForgotSendOTP} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5", color: "var(--fg)", opacity: 0.8 }}>
+                    Enter the email address linked to your account. We'll send a 6-digit verification code.
+                  </p>
+                  <div>
+                    <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>College Email</label>
+                    <input type="email" className="nb-input" required placeholder="your.email@college.edu"
+                      value={forgotForm.email} onChange={e => setForgotForm({...forgotForm, email: e.target.value})} />
+                  </div>
+                  <button type="submit" className="nb-btn" style={{ padding: "12px" }} disabled={forgotLoading}>
+                    {forgotLoading ? "Sending..." : "Send Verification Code"}
+                  </button>
+                </form>
+              )}
+
+              {/* Step 2: Enter OTP */}
+              {forgotStep === "otp" && (
+                <form onSubmit={handleForgotVerifyOTP} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5", color: "var(--fg)", opacity: 0.8 }}>
+                    Check your inbox for a 6-digit code from UniPocket. It expires in 5 minutes.
+                  </p>
+                  <div>
+                    <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Verification Code</label>
+                    <input type="text" className="nb-input" required maxLength={6} placeholder="Enter 6-digit code"
+                      style={{ textAlign: "center", fontSize: "24px", fontWeight: "900", letterSpacing: "8px", fontFamily: "monospace" }}
+                      value={forgotForm.otp} onChange={e => setForgotForm({...forgotForm, otp: e.target.value.replace(/\D/g, '').slice(0, 6)})} />
+                  </div>
+                  <button type="submit" className="nb-btn" style={{ padding: "12px" }} disabled={forgotLoading}>
+                    {forgotLoading ? "Verifying..." : "Verify Code"}
+                  </button>
+                  <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "var(--accent)", fontWeight: "600" }}
+                    onClick={() => { setForgotStep("email"); setForgotMsg(""); }}>
+                    Didn't receive? Send again
+                  </button>
+                </form>
+              )}
+
+              {/* Step 3: New Password */}
+              {forgotStep === "reset" && (
+                <form onSubmit={handleForgotResetPassword} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5", color: "var(--fg)", opacity: 0.8 }}>
+                    Email verified! Create a new password for your account.
+                  </p>
+                  <div>
+                    <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>New Password</label>
+                    <input type="password" className="nb-input" required minLength={6} placeholder="Minimum 6 characters"
+                      value={forgotForm.newPassword} onChange={e => setForgotForm({...forgotForm, newPassword: e.target.value})} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontWeight: "bold", fontSize: "12px", marginBottom: "4px" }}>Confirm Password</label>
+                    <input type="password" className="nb-input" required minLength={6} placeholder="Re-enter password"
+                      value={forgotForm.confirmPassword} onChange={e => setForgotForm({...forgotForm, confirmPassword: e.target.value})} />
+                  </div>
+                  <button type="submit" className="nb-btn" style={{ padding: "12px" }} disabled={forgotLoading}>
+                    {forgotLoading ? "Resetting..." : "Reset Password"}
+                  </button>
+                </form>
+              )}
+
+              {/* Step 4: Done */}
+              {forgotStep === "done" && (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <div style={{ fontSize: "48px", marginBottom: "12px" }}>✓</div>
+                  <p style={{ fontSize: "14px", lineHeight: "1.5", marginBottom: "20px" }}>
+                    Your password has been reset successfully. You can now log in with your new password.
+                  </p>
+                  <button className="nb-btn" style={{ padding: "12px", width: "100%" }} onClick={resetForgotFlow}>
+                    Back to Login
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Cookie Consent Banner */}
         {!cookieConsent && (
@@ -734,7 +918,7 @@ export default function App() {
                     <h3>How We Use Your Data</h3>
                     <p>Your data is used solely to provide the UniPocket service: tracking expenses, managing budgets, monitoring savings goals, and generating AI-powered financial insights. We do not sell, share, or distribute your personal data to third parties.</p>
                     <h3>Data Storage & Security</h3>
-                    <p>Your data is stored in a secure MySQL database with SSL encryption. Passwords are hashed using industry-standard algorithms and are never stored in plain text. We use HTTPS for all data transmission.</p>
+                    <p>Your data is stored in a secure PostgreSQL database with SSL encryption. Passwords are hashed using industry-standard algorithms and are never stored in plain text. We use HTTPS for all data transmission.</p>
                     <h3>Local Storage</h3>
                     <p>We use your browser's local storage to maintain your login session and remember your theme preference. No tracking cookies are used.</p>
                     <h3>Data Deletion</h3>
