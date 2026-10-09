@@ -9,7 +9,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import "./App.css";
 
-const BACKEND_URL = "https://unipocket.onrender.com";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 export default function App() {
   // Global State & State Persistence (unipocket_user)
@@ -58,6 +58,14 @@ export default function App() {
   // View Switcher & Toast Notifications State
   const [viewPeriod, setViewPeriod] = useState("month"); // "all", "month", "week"
   const [toasts, setToasts] = useState([]);
+
+  // Cookie Consent State
+  const [cookieConsent, setCookieConsent] = useState(() => {
+    try { return localStorage.getItem("unipocket_cookie_consent") === "true"; } catch { return false; }
+  });
+
+  // Legal Modal State (privacy | terms | null)
+  const [legalModal, setLegalModal] = useState(null);
 
   // Preset 1-Tap Quick Expenses Data
   const QUICK_PRESETS = [
@@ -323,6 +331,18 @@ export default function App() {
     e.preventDefault();
     if (!authForm.email || !authForm.password || !authForm.student_id) {
       showToast("Please fill in all required registration fields.", "error");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authForm.email)) {
+      showToast("Please enter a valid email address.", "error");
+      return;
+    }
+    if (authForm.password.length < 6) {
+      showToast("Password must be at least 6 characters.", "error");
+      return;
+    }
+    if (authForm.contact_number && !/^\+?\d{7,15}$/.test(authForm.contact_number.replace(/\s/g, ''))) {
+      showToast("Please enter a valid phone number.", "error");
       return;
     }
 
@@ -679,7 +699,70 @@ export default function App() {
               <span style={{ cursor: "pointer", fontWeight: "700", fontSize: "13px", color: "var(--accent)" }} onClick={() => setAuthMode("login")}>Already registered? Login to account →</span>
             )}
           </div>
+
+          <div style={{ textAlign: "center", marginTop: "16px", fontSize: "11px", opacity: 0.6 }}>
+            By continuing you agree to our{" "}
+            <span style={{ cursor: "pointer", textDecoration: "underline", color: "var(--accent)" }} onClick={() => setLegalModal("privacy")}>Privacy Policy</span>{" & "}
+            <span style={{ cursor: "pointer", textDecoration: "underline", color: "var(--accent)" }} onClick={() => setLegalModal("terms")}>Terms of Service</span>
+          </div>
         </div>
+
+        {/* Cookie Consent Banner */}
+        {!cookieConsent && (
+          <div className="cookie-banner">
+            <span>We use local storage to keep you logged in and save your preferences. No third-party cookies.</span>
+            <button className="nb-btn" style={{ padding: "6px 14px", fontSize: "12px", flexShrink: 0 }} onClick={() => { setCookieConsent(true); try { localStorage.setItem("unipocket_cookie_consent", "true"); } catch {} }}>
+              Accept
+            </button>
+          </div>
+        )}
+
+        {/* Legal Modal */}
+        {legalModal && (
+          <div className="legal-overlay" onClick={() => setLegalModal(null)}>
+            <div className="legal-modal" onClick={e => e.stopPropagation()}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h2 style={{ margin: 0, fontSize: "20px" }}>{legalModal === "privacy" ? "Privacy Policy" : "Terms of Service"}</h2>
+                <button onClick={() => setLegalModal(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--fg)" }}>✕</button>
+              </div>
+              <div className="legal-content">
+                {legalModal === "privacy" ? (
+                  <>
+                    <p><strong>Last updated:</strong> October 2026</p>
+                    <h3>Information We Collect</h3>
+                    <p>UniPocket collects the information you provide during registration: your student ID, name, email address, and contact number. We also store the financial data you enter, including expenses, budgets, and savings goals.</p>
+                    <h3>How We Use Your Data</h3>
+                    <p>Your data is used solely to provide the UniPocket service: tracking expenses, managing budgets, monitoring savings goals, and generating AI-powered financial insights. We do not sell, share, or distribute your personal data to third parties.</p>
+                    <h3>Data Storage & Security</h3>
+                    <p>Your data is stored in a secure MySQL database with SSL encryption. Passwords are hashed using industry-standard algorithms and are never stored in plain text. We use HTTPS for all data transmission.</p>
+                    <h3>Local Storage</h3>
+                    <p>We use your browser's local storage to maintain your login session and remember your theme preference. No tracking cookies are used.</p>
+                    <h3>Data Deletion</h3>
+                    <p>You can request deletion of your account and all associated data by contacting us at the email provided in your institution's records.</p>
+                    <h3>Contact</h3>
+                    <p>For privacy-related questions, reach out via your registered college email.</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Last updated:</strong> October 2026</p>
+                    <h3>Acceptance of Terms</h3>
+                    <p>By accessing and using UniPocket, you agree to be bound by these Terms of Service. If you do not agree, please do not use the platform.</p>
+                    <h3>Description of Service</h3>
+                    <p>UniPocket is a student financial management tool that helps you track expenses, set budget limits, manage savings goals, and receive AI-generated financial tips. The service is provided free of charge for educational purposes.</p>
+                    <h3>User Responsibilities</h3>
+                    <p>You are responsible for maintaining the security of your account credentials. You agree to provide accurate information and to use the service only for lawful personal finance management.</p>
+                    <h3>Data Accuracy</h3>
+                    <p>Financial insights and AI tips provided by UniPocket are for informational purposes only and do not constitute professional financial advice. Always consult a qualified financial advisor for important financial decisions.</p>
+                    <h3>Service Availability</h3>
+                    <p>We strive to keep UniPocket available at all times but do not guarantee uninterrupted service. We reserve the right to modify or discontinue features with reasonable notice.</p>
+                    <h3>Limitation of Liability</h3>
+                    <p>UniPocket is provided "as is" without warranty. We are not liable for any financial losses resulting from reliance on information provided by the platform.</p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1401,6 +1484,68 @@ export default function App() {
             />
             <button type="submit" disabled={chatLoading}>Ask</button>
           </form>
+        </div>
+      )}
+
+      {/* FOOTER */}
+      <footer style={{ textAlign: "center", padding: "24px 0 8px", fontSize: "12px", opacity: 0.5, borderTop: "2px dashed var(--border)", marginTop: "8px" }}>
+        <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setLegalModal("privacy")}>Privacy Policy</span>
+        {" | "}
+        <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setLegalModal("terms")}>Terms of Service</span>
+        {" | "}
+        <span>UniPocket &copy; {new Date().getFullYear()}</span>
+      </footer>
+
+      {/* Cookie Consent Banner */}
+      {!cookieConsent && (
+        <div className="cookie-banner">
+          <span>We use local storage to keep you logged in and save your preferences. No third-party cookies.</span>
+          <button className="nb-btn" style={{ padding: "6px 14px", fontSize: "12px", flexShrink: 0 }} onClick={() => { setCookieConsent(true); try { localStorage.setItem("unipocket_cookie_consent", "true"); } catch {} }}>
+            Accept
+          </button>
+        </div>
+      )}
+
+      {/* Legal Modal */}
+      {legalModal && (
+        <div className="legal-overlay" onClick={() => setLegalModal(null)}>
+          <div className="legal-modal" onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h2 style={{ margin: 0, fontSize: "20px" }}>{legalModal === "privacy" ? "Privacy Policy" : "Terms of Service"}</h2>
+              <button onClick={() => setLegalModal(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--fg)" }}>✕</button>
+            </div>
+            <div className="legal-content">
+              {legalModal === "privacy" ? (
+                <>
+                  <p><strong>Last updated:</strong> October 2026</p>
+                  <h3>Information We Collect</h3>
+                  <p>UniPocket collects the information you provide during registration: your student ID, name, email address, and contact number. We also store the financial data you enter, including expenses, budgets, and savings goals.</p>
+                  <h3>How We Use Your Data</h3>
+                  <p>Your data is used solely to provide the UniPocket service. We do not sell, share, or distribute your personal data to third parties.</p>
+                  <h3>Data Storage & Security</h3>
+                  <p>Your data is stored in a secure MySQL database with SSL encryption. Passwords are hashed using industry-standard algorithms. We use HTTPS for all data transmission.</p>
+                  <h3>Local Storage</h3>
+                  <p>We use your browser's local storage to maintain your login session and theme preference. No tracking cookies are used.</p>
+                  <h3>Contact</h3>
+                  <p>For privacy-related questions, reach out via your registered college email.</p>
+                </>
+              ) : (
+                <>
+                  <p><strong>Last updated:</strong> October 2026</p>
+                  <h3>Acceptance of Terms</h3>
+                  <p>By using UniPocket, you agree to these Terms. If you do not agree, please do not use the platform.</p>
+                  <h3>Description of Service</h3>
+                  <p>UniPocket is a student financial management tool provided free of charge for educational purposes.</p>
+                  <h3>User Responsibilities</h3>
+                  <p>You are responsible for maintaining the security of your account credentials and providing accurate information.</p>
+                  <h3>Disclaimer</h3>
+                  <p>Financial insights and AI tips are for informational purposes only and do not constitute professional financial advice.</p>
+                  <h3>Limitation of Liability</h3>
+                  <p>UniPocket is provided "as is" without warranty. We are not liable for any financial losses resulting from reliance on information provided by the platform.</p>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

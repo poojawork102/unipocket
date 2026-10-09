@@ -1,18 +1,33 @@
 import os
+import time
+from collections import defaultdict
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pymysql.cursors
-import ssl 
+import ssl
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Simple in-memory rate limiter
+_rate_store = defaultdict(list)
+RATE_LIMIT = 30
+RATE_WINDOW = 60
+
+def is_rate_limited(key):
+    now = time.time()
+    _rate_store[key] = [t for t in _rate_store[key] if now - t < RATE_WINDOW]
+    if len(_rate_store[key]) >= RATE_LIMIT:
+        return True
+    _rate_store[key].append(now)
+    return False
 # MySQL Connection Configuration
 
 db_config = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'pooja'),
+    'password': os.getenv('DB_PASSWORD', ''),
     'database': os.getenv('DB_NAME', 'up'),
     'cursorclass': pymysql.cursors.DictCursor
 }
@@ -34,6 +49,9 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
     return response
 
 def get_db_connection():
@@ -44,7 +62,7 @@ def get_db_connection():
         host=os.getenv('DB_HOST', 'localhost'),
         port=int(os.getenv('DB_PORT', 18018)),
         user=os.getenv('DB_USER', 'root'),
-        password=os.getenv('DB_PASSWORD', 'pooja'),
+        password=os.getenv('DB_PASSWORD', ''),
         database=os.getenv('DB_NAME', 'up'),
         connect_timeout=5,
         ssl=ssl_config,
@@ -99,7 +117,10 @@ def init_db():
         if conn:
             conn.close()
 
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"init_db skipped (will retry on first request): {e}")
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -109,6 +130,10 @@ def health_check():
 
 @app.route('/api/register', methods=['POST'])
 def register():
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if is_rate_limited(f"register:{client_ip}"):
+        return jsonify({"error": "Too many requests. Please try again later."}), 429
+
     data = request.json or {}
     student_id = data.get('student_id') or data.get('studentId')
     email = data.get('email') or data.get('collegeEmail') or data.get('college_email')
@@ -142,6 +167,10 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 def login():
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if is_rate_limited(f"login:{client_ip}"):
+        return jsonify({"error": "Too many login attempts. Please wait a moment."}), 429
+
     data = request.json or {}
     email = data.get('email') or data.get('collegeEmail') or data.get('college_email')
     password = data.get('password')
@@ -237,18 +266,17 @@ def delete_expense(expense_id):
         return jsonify({"status": "ok"}), 200
 
     student_id = request.args.get('student_id') or (request.json and request.json.get('student_id'))
-    
+
+    if not student_id:
+        return jsonify({"error": "Student ID required for authorization"}), 401
+
     conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
-            if student_id:
-                sql = "DELETE FROM expenses WHERE id = %s AND student_id = %s"
-                cursor.execute(sql, (expense_id, student_id))
-            else:
-                sql = "DELETE FROM expenses WHERE id = %s"
-                cursor.execute(sql, (expense_id,))
-            
+            sql = "DELETE FROM expenses WHERE id = %s AND student_id = %s"
+            cursor.execute(sql, (expense_id, student_id))
+
             if cursor.rowcount == 0:
                 return jsonify({"error": "Expense record not found or unauthorized"}), 404
         conn.commit()
@@ -267,8 +295,9 @@ def handle_budgets():
     if not student_id:
         return jsonify({"error": "Student ID required"}), 400
 
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             if request.method == 'GET':
                 cursor.execute("SELECT * FROM budgets WHERE student_id = %s", (student_id,))
@@ -289,7 +318,8 @@ def handle_budgets():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 @app.route('/api/savings', methods=['GET', 'POST'])
 def handle_savings():
@@ -297,8 +327,9 @@ def handle_savings():
     if not student_id:
         return jsonify({"error": "Student ID required"}), 400
 
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             if request.method == 'GET':
                 cursor.execute("SELECT * FROM savings_goals WHERE student_id = %s", (student_id,))
@@ -319,7 +350,8 @@ def handle_savings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- AI MONEY COACH ENDPOINT ---
 @app.route('/api/ai/tip', methods=['GET'])
@@ -329,6 +361,7 @@ def get_ai_tip():
     if not student_id:
         return jsonify({"tip": "Always track your daily spending to identify budget leaks!"})
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -347,7 +380,8 @@ def get_ai_tip():
     except Exception:
         return jsonify({"tip": "Consistency is key! Try setting a concrete savings goal this weekend."}), 200
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- SAVINGS DEPOSIT ENDPOINT ---
 @app.route('/api/savings/deposit', methods=['POST'])
@@ -360,6 +394,7 @@ def deposit_savings():
     if not all([student_id, goal_id, amount]):
         return jsonify({"error": "Missing parameters"}), 400
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -377,7 +412,8 @@ def deposit_savings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- AI MONEY COACH CHAT ENDPOINT ---
 @app.route('/api/ai/chat', methods=['POST'])
@@ -389,6 +425,7 @@ def ai_chat():
     if not student_id or not message:
         return jsonify({"reply": "I'm listening! Ask me anything about your money, budgets, or savings."}), 400
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -491,7 +528,8 @@ def ai_chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- PROFILE UPDATE ENDPOINT ---
 @app.route('/api/user/update', methods=['POST'])
@@ -506,6 +544,7 @@ def update_user():
     if not student_id or not name or not email:
         return jsonify({"error": "Missing required fields"}), 400
 
+    conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -529,7 +568,8 @@ def update_user():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- CATEGORY MANAGEMENT ENDPOINT ---
 @app.route('/api/categories', methods=['GET', 'POST'])
@@ -538,8 +578,9 @@ def handle_categories():
     if not student_id:
         return jsonify({"error": "Student ID required"}), 400
 
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             if request.method == 'GET':
                 cursor.execute("SELECT name FROM categories WHERE student_id = %s", (student_id,))
@@ -569,7 +610,20 @@ def handle_categories():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint not found", "status": 404}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "Method not allowed", "status": 405}), 405
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Internal server error", "status": 500}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
